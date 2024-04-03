@@ -55,17 +55,21 @@ class OdemisMicroscope(FibsemMicroscope):
 
         self.connection = model.getComponent(role="fibsem")
 
+        # stage
+        self.stage = model.getComponent(role="stage-bare")
+
+
         # setup electron beam, det
-        electron_beam = model.getComponent(role="e-beam")
-        electron_det = model.getComponent(role="electron-detector")
+        self.electron_beam = model.getComponent(role="e-beam")
+        self.electron_det = model.getComponent(role="electron-detector")
 
         # setup ion beam, det
-        ion_beam = model.getComponent(role="ion-beam")
-        ion_det = model.getComponent(role="ion-detector")
+        self.ion_beam = model.getComponent(role="ion-beam")
+        self.ion_det = model.getComponent(role="ion-detector")
 
         # create streams
-        self.sem_stream = SEMStream("sem-stream", electron_det, electron_det.data, electron_beam)
-        self.fib_stream = FIBStream("fib-stream", ion_det, ion_det.data, ion_beam)
+        self.sem_stream = SEMStream("sem-stream", self.electron_det, self.electron_det.data, self.electron_beam)
+        self.fib_stream = FIBStream("fib-stream", self.ion_det, self.ion_det.data, self.ion_beam)
 
     def connect_to_microscope(self, ip_address: str, port: int) -> None:
         pass
@@ -142,14 +146,12 @@ class OdemisMicroscope(FibsemMicroscope):
         pass
 
     def move_stage_absolute(self, position: FibsemStagePosition) -> None:
-        stage = model.getComponent(role="stage-bare")
         pdict = stage_position_to_odemis_dict(position)
-        stage.moveAbsSync(pdict)
+        self.stage.moveAbsSync(pdict)
 
     def move_stage_relative(self, position: FibsemStagePosition) -> None:
-        stage = model.getComponent(role="stage-bare")
         pdict = stage_position_to_odemis_dict(position)
-        stage.moveRelSync(pdict)
+        self.stage.moveRelSync(pdict)
 
     def stable_move(self, dx: float, dy: float, beam_type: BeamType) -> None:
         pass
