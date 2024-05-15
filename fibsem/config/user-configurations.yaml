@@ -1,4 +1,6 @@
 configurations:
+  arctis-configuration:
+    path: C:/Software/adaptive_milling_apps/arctis-configuration.yaml
   default-configuration:
-    path: null
-default: default-configuration
+    path: c:\software\adaptive_milling_apps\2024-05-09 elaine adaptive milling\fibsem\fibsem\config\microscope-configuration.yaml
+default: arctis-configuration
