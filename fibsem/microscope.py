@@ -4,6 +4,8 @@ import logging
 import sys
 from napari.qt.threading import thread_worker
 import os
+from pathlib import Path
+import tifffile
 
 # for easier usage
 import fibsem.constants as constants
@@ -70,7 +72,14 @@ try:
 except Exception as e:
     logging.debug("Autoscript (ThermoFisher) not installed.")
     if isinstance(e, NameError):
-        raise e 
+        raise e
+
+try:
+    AdornedImage
+except NameError:
+    logging.info("AdornedImage  not defined. Defining it here")
+    import fibsem.spoof_adorned_image
+    AdornedImage=fibsem.spoof_adorned_image.SpoofAdornedImage
 
 import sys
 
@@ -255,7 +264,8 @@ class FibsemMicroscope(ABC):
         pass
 
     @abstractmethod
-    def run_milling(self, milling_current: float, asynch: bool) -> None:
+    #def run_milling(self, milling_current: float, asynch: bool) -> None:
+    def run_milling(self, milling_current: float, milling_voltage: float, asynch: bool) -> None:
         pass
     
     @abstractmethod
@@ -1612,18 +1622,18 @@ class ThermoMicroscope(FibsemMicroscope):
         Args:
             mill_settings (FibsemMillingSettings): Milling settings.
         """
-        _check_beam(BeamType.ION, self.system)
-        self.connection.imaging.set_active_view(BeamType.ION.value)  # the ion beam view
-        self.connection.imaging.set_active_device(BeamType.ION.value)
-        self.connection.patterning.set_default_beam_type(BeamType.ION.value)
+        self.milling_channel = BeamType.ION
+        _check_beam(self.milling_channel, self.system)
+        self.connection.imaging.set_active_view(self.milling_channel.value)  # the ion beam view
+        self.connection.imaging.set_active_device(self.milling_channel.value)
+        self.connection.patterning.set_default_beam_type(self.milling_channel.value)
         self.connection.patterning.set_default_application_file(mill_settings.application_file)
         self.connection.patterning.mode = mill_settings.patterning_mode
         self.connection.patterning.clear_patterns()  # clear any existing patterns
-        self.connection.beams.ion_beam.horizontal_field_width.value = mill_settings.hfw
-
-        # self.set("hfw", mill_settings.hfw, BeamType.ION) # TODO: replace
-        self.set("current", mill_settings.milling_current, BeamType.ION)
-        self.set("voltage", mill_settings.milling_voltage, BeamType.ION)
+        
+        self.set("hfw", mill_settings.hfw, self.milling_channel)
+        self.set("current", mill_settings.milling_current, self.milling_channel)
+        self.set("voltage", mill_settings.milling_voltage, self.milling_channel)
     
         logging.debug({"msg": "setup_milling", "mill_settings": mill_settings.to_dict()})
 
@@ -1642,15 +1652,15 @@ class ThermoMicroscope(FibsemMicroscope):
         
         try:
             # change to milling current, voltage
-            if self.get("voltage", BeamType.ION) != milling_voltage:
-                self.set("voltage", milling_voltage, BeamType.ION)
-            if self.get("current", BeamType.ION) != milling_current:
-                self.set("current", milling_current, BeamType.ION)
+            if self.get("voltage", self.milling_channel) != milling_voltage:
+                self.set("voltage", milling_voltage, self.milling_channel)
+            if self.get("current", self.milling_channel) != milling_current:
+                self.set("current", milling_current, self.milling_channel)
         except Exception as e:
             logging.warning(f"Failed to set voltage or current: {e}, voltage={milling_voltage}, current={milling_current}")
 
         # run milling (asynchronously)
-        self.connection.imaging.set_active_view(BeamType.ION.value)  # the ion beam view
+        self.connection.imaging.set_active_view(self.milling_channel.value)  # the ion beam view
         logging.info(f"running ion beam milling now... asynchronous={asynch}")
         if asynch:
             self.connection.patterning.start()
@@ -1686,13 +1696,13 @@ class ThermoMicroscope(FibsemMicroscope):
         Raises:
             None
         """
-        _check_beam(BeamType.ION, self.system)
+        _check_beam(self.milling_channel, self.system)
         # change to milling current
-        self.connection.imaging.set_active_view(BeamType.ION.value)  # the ion beam view
-        if self.get("voltage", BeamType.ION) != milling_voltage:
-            self.set("voltage", milling_voltage, BeamType.ION)
-        if self.get("current", BeamType.ION) != milling_current:
-            self.set("current", milling_current, BeamType.ION)
+        self.connection.imaging.set_active_view(self.milling_channel.value)  # the ion beam view
+        if self.get("voltage", self.milling_channel) != milling_voltage:
+            self.set("voltage", milling_voltage, self.milling_channel)
+        if self.get("current", self.milling_channel) != milling_current:
+            self.set("current", milling_current, self.milling_channel)
 
 
         # run milling (asynchronously)
@@ -1709,7 +1719,7 @@ class ThermoMicroscope(FibsemMicroscope):
             logging.info("Drift correction")
             alignment.beam_shift_alignment_v2(microscope = self, ref_image=ref_image)
             time.sleep(1) # need delay to switch back to patterning mode 
-            self.connection.imaging.set_active_view(BeamType.ION.value)
+            self.connection.imaging.set_active_view(self.milling_channel.value)
             if self.connection.patterning.state == PatterningState.PAUSED: # check if finished 
                 self.connection.patterning.resume()
                 time.sleep(5)
@@ -1723,10 +1733,10 @@ class ThermoMicroscope(FibsemMicroscope):
         Args:
             imaging_current (float): The current to use for imaging in amps.
         """
-        _check_beam(BeamType.ION, self.system)
+        _check_beam(self.milling_channel, self.system)
         self.connection.patterning.clear_patterns()
-        self.set("current", imaging_current, BeamType.ION)
-        self.set("voltage", imaging_voltage, BeamType.ION)
+        self.set("current", imaging_current, self.milling_channel)
+        self.set("voltage", imaging_voltage, self.milling_channel)
         self.connection.patterning.mode = "Serial"
 
         logging.debug({"msg": "finish_milling", "imaging_current": imaging_current, "imaging_voltage": imaging_voltage})
@@ -1788,6 +1798,10 @@ class ThermoMicroscope(FibsemMicroscope):
             height=pattern_settings.height,
             depth=pattern_settings.depth,
         )
+
+        if not np.isclose(pattern_settings.time, 0.0):
+            logging.debug(f"Setting pattern time to {pattern_settings.time}.")
+            pattern.time = pattern_settings.time
 
         # set pattern rotation
         pattern.rotation = pattern_settings.rotation
@@ -2667,7 +2681,6 @@ class ThermoMicroscope(FibsemMicroscope):
         if key == "hardware_version":
             return self.system.info.hardware_version
         
-
             
         # logging.warning(f"Unknown key: {key} ({beam_type})")
         return None    
@@ -2699,7 +2712,7 @@ class ThermoMicroscope(FibsemMicroscope):
             return
         if key == "hfw":
             limits = beam.horizontal_field_width.limits
-            value = np.clip(value, limits.min, limits.max)
+            value = np.clip(value, limits.min, limits.max-10e-6)
             beam.horizontal_field_width.value = value
             logging.info(f"{beam_type.name} HFW set to {value} m.")
             return 
@@ -5738,6 +5751,8 @@ class DemoMicroscope(FibsemMicroscope):
 
     def draw_rectangle(self, pattern_settings: FibsemRectangleSettings) -> None:
         logging.debug({"msg": "draw_rectangle", "pattern_settings": pattern_settings.to_dict()})
+        if pattern_settings.time != 0:
+            logging.info(f"Setting pattern time to {pattern_settings.time}.")
 
     def draw_line(self, pattern_settings: FibsemLineSettings) -> None:
         logging.debug({"msg": "draw_line", "pattern_settings": pattern_settings.to_dict()})
@@ -6042,6 +6057,33 @@ class DemoMicroscope(FibsemMicroscope):
             else:
                 raise ValueError(f"Unknown beam type: {beam_type} for {key}")
             return
+        
+        if key == "stage_link":
+            logging.info(f"Linking stage...")
+            self.stage_system.is_linked = True
+            logging.info(f"Stage linked.")
+            return
+
+        # chamber properties
+        if key == "pump_chamber":
+            if value:
+                logging.info(f"Pumping chamber...")
+                self.chamber.state = "Pumped"
+                self.chamer.pressure = 1e-6 # 1 uTorr
+                logging.info(f"Chamber pumped.")
+            else:
+                logging.info(f"Invalid value for pump_chamber: {value}")
+            return
+        if key == "vent_chamber":
+            if value:
+                logging.info(f"Venting chamber...")
+                self.chamber.state = "Vented"
+                self.chamer.pressure = 1e5
+                logging.info(f"Chamber vented.")
+            else:
+                logging.info(f"Invalid value for vent_chamber: {value}")
+            return
+
 
         if key == "eucentric_height":
             if beam_type is BeamType.ELECTRON:
@@ -6207,3 +6249,160 @@ def _check_manipulator_movement(settings: SystemSettings, position: FibsemManipu
     req_tilt = position.t is not None
 
     _check_manipulator(settings, rotation=req_rotation, tilt=req_tilt)
+
+
+class Demo2Microscope(DemoMicroscope):
+    """
+    Subclasses existing Demo but replacing only the acquire image function
+
+    One potential problem is if user wants a specific image resolution and pixel size,
+    and what this can provide is different.
+
+    """
+    def __init__(self, system_settings: SystemSettings):
+        super().__init__(system_settings)
+
+        # TODO: Modify this default implementation with our implementation
+        SEM_folder_path_str = eval(system_settings.demo2["SEM_folder_path_str"]) # TODO: check this works
+        FIB_folder_path_str = eval(system_settings.demo2["FIB_folder_path_str"])
+
+        folder_p_SEM = Path(SEM_folder_path_str)
+        folder_p_FIB = Path(FIB_folder_path_str)
+
+        #This below is giving error, not sure why
+        # if not folder_p_SEM.exists():
+        #     raise ValueError(f"{SEM_folder_path_str} is not a valid folder")
+        # if not folder_p_FIB.exists():
+        #     raise ValueError(f"{FIB_folder_path_str} is not a valid folder")
+
+        self.cycle_example_images_SEM = folder_p_SEM.glob("*.tif")
+        self.cycle_example_images_FIB = folder_p_FIB.glob("*.tif")
+
+        # print(len(list(self.cycle_example_images_SEM)))
+        # print(len(list(self.cycle_example_images_FIB)))
+    
+    def acquire_image(self, image_settings: ImageSettings) -> FibsemImage:
+
+        # _check_beam(image_settings.beam_type, self.system)
+        # vfw = image_settings.hfw * image_settings.resolution[1] / image_settings.resolution[0]
+        # pixelsize = Point(image_settings.hfw / image_settings.resolution[0], 
+        #                   vfw / image_settings.resolution[1])
+        
+        # logging.info(f"acquiring new {image_settings.beam_type.name} image.")
+        # image = FibsemImage(
+        #     data=np.random.randint(low=0, high=256, 
+        #         size=(image_settings.resolution[1],image_settings.resolution[0]), 
+        #         dtype=np.uint8),
+        #     metadata=FibsemImageMetadata(image_settings=image_settings, 
+        #                                 pixel_size=pixelsize,
+        #                                 microscope_state=self.get_microscope_state(beam_type=image_settings.beam_type),
+        #                                 system=self.system
+        #                                 )
+        # )
+
+        # image.metadata.user = self.user
+        # image.metadata.experiment = self.experiment
+        # image.metadata.system = self.system
+
+        # if image_settings.beam_type is BeamType.ELECTRON:
+        #     self._eb_image = image
+        # else:
+        #     self._ib_image = image
+
+        _check_beam(image_settings.beam_type, self.system)
+        vfw = image_settings.hfw * image_settings.resolution[1] / image_settings.resolution[0]
+        pixelsize = Point(image_settings.hfw / image_settings.resolution[0], 
+                          vfw / image_settings.resolution[1])
+        
+        logging.info(f"acquiring new {image_settings.beam_type.name} image.")
+        logging.info(f"resolution:{image_settings.resolution}, hfw:{image_settings.hfw}")
+        
+        new_image_fn=None #default
+
+        try:
+            if image_settings.beam_type is BeamType.ELECTRON:
+                new_image_fn = next(self.cycle_example_images_SEM)
+                logging.info("SEM")
+                
+            elif image_settings.beam_type is BeamType.ION:
+                #cycle_example_images = self.cycle_example_images_FIB
+                new_image_fn = next(self.cycle_example_images_FIB)
+                logging.info("FIB")
+        except:
+            logging.warning("new_image_fn is None. Probably run out of images in folder.")
+            return None
+        
+        ad_img = AdornedImage.load(new_image_fn)
+
+        # Problem, FibsemImage function fromAdornedImage() only works if THERMO
+        # Using this method can cause problem because a specific image size is requested
+        # and a new size and pixel size is returned.
+        # fibsem_image = FibsemImage.fromAdornedImage(
+        #     copy.deepcopy(ad_img), 
+        #     copy.deepcopy(image_settings), 
+        #     # copy.deepcopy(self.get_microscope_state(beam_type=image_settings.beam_type))
+        #     None
+        # )
+
+        # Try to create a new image from loaded one
+        # by resizing using skimage
+
+        img_data = ad_img.data
+        #img_data = ad_img.raw_data
+        logging.info(f"img_data.type:{type(img_data)}")
+        logging.info(f"img_data.dtype:{img_data.dtype}, img_data.shape:{img_data.shape}")
+
+        newshape = tuple(np.array(image_settings.resolution)[::-1]) #inverts shape, resloution is in X,Y, so converts to Y,X format 
+        if ad_img.data.shape !=  newshape:
+            logging.info(f"demo image has shape:{ad_img.data.shape}. Resizing to {newshape}")
+            from skimage.transform import resize
+            dt = img_data.dtype
+            img_data = resize(img_data, newshape, anti_aliasing=True, preserve_range=True).astype(dt)
+            logging.info(f"Resized, img_data.dtype:{img_data.dtype}, img_data.shape:{img_data.shape}")
+        
+        data_uint8 = img_data
+        #Turn new_image_fn to uint8
+        if img_data.dtype in [np.uint16, np.int16]:
+            logging.info(f"img_data is int16 or uint16, converting to uint8")
+            data_uint8 = (img_data/256).astype(np.uint8)
+        elif img_data.dtype in [np.uint32, np.int32]:
+            logging.info(f"img_data is int32 or uint32, converting to uint8")
+            data_uint8 = (img_data/65536).astype(np.uint8)                    
+        elif np.issubdtype(img_data.dtype, np.floating):
+            logging.info(f"img_data is float, converting to uint8")
+            data_uint8 = (img_data/img_data.max()*255).astype(np.uint8)
+
+        logging.info(f"data_uint8.dtype:{data_uint8.dtype}")
+
+        if data_uint8.dtype != np.uint8:
+            logging.warning("img_data could not be converted to uint8. Forcing...")
+            #force
+            data_uint8 =  img_data.astype(np.uint8)
+
+        # logging.info(f"data_uint8.dtype:{data_uint8.dtype}")
+
+        fibsem_image = FibsemImage(
+            data=data_uint8,
+            metadata=FibsemImageMetadata(image_settings=image_settings, 
+                                        pixel_size=pixelsize,
+                                        microscope_state=self.get_microscope_state(beam_type=image_settings.beam_type),
+                                        system=self.system
+                                        )
+        )
+
+
+        # set additional metadata
+        fibsem_image.metadata.user = self.user
+        fibsem_image.metadata.experiment = self.experiment
+        fibsem_image.metadata.system = self.system
+
+        if image_settings.beam_type is BeamType.ELECTRON:
+            self._eb_image = fibsem_image # must be FibsemImage object
+        elif image_settings.beam_type is BeamType.ION:
+            self._ib_image = fibsem_image # must be FibsemImage object
+        
+
+        logging.debug({"msg": "acquire_image", "metadata": fibsem_image.metadata.to_dict()})
+
+        return fibsem_image
+

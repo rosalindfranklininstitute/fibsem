@@ -21,7 +21,7 @@ def check_keys(protocol: dict, required_keys: list[str]) -> bool:
 
     
 REQUIRED_KEYS = {
-    "Rectangle": ("width", "height", "depth", "rotation","passes", "scan_direction", "cross_section"),
+    "Rectangle": ("width", "height", "depth", "rotation","passes", "scan_direction", "cross_section", "time"),
     "Line": ("start_x", "end_x", "start_y", "end_y", "depth"),
     "Circle": ("radius", "depth"),
     "Trench": (
@@ -32,6 +32,7 @@ REQUIRED_KEYS = {
         "offset",
         "depth",
         "cross_section",
+        "time", 
     ),
     "Horseshoe": (
         "lamella_width",
@@ -65,6 +66,7 @@ REQUIRED_KEYS = {
         "inverted",
         "use_side_patterns",
     ),
+    "RectangleOffset": ("width", "height", "depth", "scan_direction", "cross_section", "offset", "inverted"),
     "Fiducial": ("height", "width", "depth", "rotation", "cross_section"),
     "Undercut": (
         "height",
@@ -113,7 +115,7 @@ class BasePattern(ABC):
     @abstractmethod
     def define(
         self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         pass
 
     def to_dict(self):
@@ -146,7 +148,7 @@ class BitmapPattern(BasePattern):
 
     def define(
             self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         protocol["centre_x"] = point.x
         protocol["centre_y"] = point.y
         protocol["pattern"] = "BitmapPattern"  
@@ -285,6 +287,7 @@ class TrenchPattern(BasePattern):
         depth = protocol["depth"]
         use_cleaning_cross_section = protocol.get("cleaning_cross_section", False)
         cross_section = CrossSectionPattern[protocol.get("cross_section", "Rectangle")]
+        time = protocol.get("time", 0.0)
 
         centre_upper_y = point.y + (
             lamella_height / 2 + upper_trench_height / 2 + offset
@@ -300,7 +303,8 @@ class TrenchPattern(BasePattern):
             centre_y=centre_lower_y,
             cleaning_cross_section=use_cleaning_cross_section,
             scan_direction="BottomToTop",
-            cross_section = cross_section
+            cross_section = cross_section,
+            time = time
 
         )
 
@@ -312,7 +316,8 @@ class TrenchPattern(BasePattern):
             centre_y=centre_upper_y,
             cleaning_cross_section=use_cleaning_cross_section,
             scan_direction="TopToBottom",
-            cross_section = cross_section
+            cross_section = cross_section,
+            time = time
         )
 
         self.patterns = [lower_pattern_settings, upper_pattern_settings]
@@ -544,6 +549,48 @@ class SerialSectionPattern(BasePattern):
         return self.patterns
 
 @dataclass
+class RectangleOffsetPattern(BasePattern):
+    name: str = "RectangleOffset"
+    required_keys: tuple[str] = REQUIRED_KEYS["RectangleOffset"]
+    patterns = None
+    protocol = None
+    point = None
+
+    def define(
+        self, protocol: dict, point: Point = Point()
+    ) -> list[FibsemRectangleSettings]:
+        check_keys(protocol, self.required_keys)
+
+        width = protocol["width"]
+        height = protocol["height"]
+        depth = protocol["depth"]
+        offset = protocol["offset"]
+        scan_direction = protocol.get("scan_direction", "TopToBottom")
+        cross_section = CrossSectionPattern[protocol.get("cross_section", "Rectangle")]
+        inverted = protocol.get("inverted", False)
+
+        offset = offset + height / 2
+        if inverted:
+            offset = -offset
+            
+        center_y = point.y + offset
+
+        pattern = FibsemRectangleSettings(
+            width=width,
+            height=height,
+            depth=depth,
+            centre_x=point.x,
+            centre_y=center_y,
+            scan_direction=scan_direction,
+            cross_section = cross_section,
+        )
+
+        self.patterns = [pattern]
+        self.protocol = protocol
+        self.point = point
+        return self.patterns
+
+@dataclass
 class FiducialPattern(BasePattern):
     name: str = "Fiducial"
     required_keys: tuple[str] = REQUIRED_KEYS["Fiducial"]
@@ -664,7 +711,7 @@ class MicroExpansionPattern(BasePattern):
             protocol (dict): Lamella protocol
 
         Returns:
-            patterns: list[FibsemPatternSettings]
+            patterns: list[FibsemPattern]
         """
         check_keys(protocol, self.required_keys)
 
@@ -862,7 +909,7 @@ class CloverPattern(BasePattern):
 
     def define(
         self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         check_keys(protocol, self.required_keys)
 
         radius = protocol["radius"]
@@ -917,7 +964,7 @@ class TriForcePattern(BasePattern):
 
     def define(
         self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         check_keys(protocol, self.required_keys)
 
         height = protocol["height"]
@@ -956,7 +1003,7 @@ class TrapezoidPattern(BasePattern):
     protocol = None
     point = None
 
-    def define(self, protocol: dict, point: Point = Point()) -> list[FibsemPatternSettings]:
+    def define(self, protocol: dict, point: Point = Point()) -> list[FibsemPattern]:
         check_keys(protocol, self.required_keys)
         self.patterns = []
         width_increments = (protocol["outer_width"] - protocol["inner_width"]) / (protocol["n_rectangles"]-1)
@@ -1008,6 +1055,7 @@ __PATTERNS__ = [
     HorseshoePattern,
     HorseshoePatternVertical,
     SerialSectionPattern,
+    RectangleOffsetPattern,
     UndercutPattern,
     FiducialPattern,
     ArrayPattern,
@@ -1179,7 +1227,9 @@ def _get_stage(key, protocol: dict, point: Point = Point(), i: int = 0) -> Fibse
 from typing import Optional, Union
 
 def get_milling_stages(key, protocol, point: Union[Point, list[Point]] = Point()):
-    
+    """
+    Returns a list of "stages" inside protocol dictionary and with given key
+    """
     # TODO: maybe add support for defining point per stages?
 
     # convert point to list of points, same length as stages

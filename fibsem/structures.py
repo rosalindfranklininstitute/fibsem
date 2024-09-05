@@ -14,6 +14,7 @@ import tifffile as tff
 import fibsem
 from fibsem.config import METADATA_VERSION
 from abc import ABC, abstractmethod, abstractstaticmethod
+import logging
 
 try:
     from tescanautomation.Common import Document
@@ -42,7 +43,12 @@ try:
 except:
     THERMO = False
 
-
+try:
+    AdornedImage
+except NameError:
+    logging.info("AdornedImage  not defined. Defining it here")
+    import fibsem.spoof_adorned_image
+    AdornedImage=fibsem.spoof_adorned_image.SpoofAdornedImage
 
 # @patrickcleeve: dataclasses.asdict -> :(
 
@@ -910,6 +916,7 @@ class FibsemRectangleSettings(FibsemPatternSettings):
     scan_direction: str = "TopToBottom"
     cross_section: CrossSectionPattern = CrossSectionPattern.Rectangle
     passes: int = 0
+    time: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -923,6 +930,7 @@ class FibsemRectangleSettings(FibsemPatternSettings):
             "scan_direction": self.scan_direction,
             "cross_section": self.cross_section.name,
             "passes": self.passes,
+            "time": self.time,
         }
 
     @staticmethod
@@ -938,6 +946,7 @@ class FibsemRectangleSettings(FibsemPatternSettings):
             scan_direction=data.get("scan_direction", "TopToBottom"),
             cross_section=CrossSectionPattern[data.get("cross_section", "Rectangle")],
             passes=data.get("passes", 0),
+            time=data.get("time", 0.0),
         )
 
 @dataclass
@@ -1305,7 +1314,8 @@ class SystemSettings:
     ion: BeamSystemSettings
     manipulator: ManipulatorSystemSettings
     gis: GISSystemSettings
-    info: SystemInfo    
+    info: SystemInfo
+    demo2:dict
 
     def to_dict(self):
         return {
@@ -1315,6 +1325,7 @@ class SystemSettings:
             "manipulator": self.manipulator.to_dict(),
             "gis": self.gis.to_dict(),
             "info": self.info.to_dict(),
+            "demo2": self.demo2
         }
     
     @staticmethod
@@ -1331,6 +1342,7 @@ class SystemSettings:
             manipulator=ManipulatorSystemSettings.from_dict(settings["manipulator"]),
             gis=GISSystemSettings.from_dict(settings["gis"]),
             info=SystemInfo.from_dict(settings["info"]),
+            demo2=settings.get("demo2",None)
         )
 
 @dataclass
@@ -1613,16 +1625,22 @@ class FibsemImage:
     """
 
     def __init__(self, data: np.ndarray, metadata: FibsemImageMetadata = None):
-        if check_data_format(data):
-            if data.ndim == 3 and data.shape[2] == 1:
-                data = data[:, :, 0]
-            self.data = data
-        else:
+        # if check_data_format(data):
+        #     if data.ndim == 3 and data.shape[2] == 1:
+        #         data = data[:, :, 0]
+        #     self.data = data
+
+        logging.info(f"data.dtype:{data.dtype}, data.shape:{data.shape}, data.ndim:{data.ndim}")
+        self.data = data
+        if data.ndim == 3 and data.shape[2] == 1:
+            self.data = data[:, :, 0]
+
+        if self.data.ndim!=2 or not self.data.dtype in [np.uint8, np.uint16] :
             raise Exception("Invalid Data format for Fibsem Image")
+        
+        self.metadata = None
         if metadata is not None:
             self.metadata = metadata
-        else:
-            self.metadata = None
 
     @classmethod
     def load(cls, tiff_path: str) -> "FibsemImage":
@@ -1648,6 +1666,14 @@ class FibsemImage:
                 # traceback.print_exc()
         return cls(data=data, metadata=metadata)
 
+    def get_save_folder(self):
+        return self.metadata.image_settings.path
+    def get_save_path(self):
+        return os.path.join(
+                self.metadata.image_settings.path,
+                self.metadata.image_settings.filename
+            )
+
     def save(self, path: Path = None) -> None:
         """Saves a FibsemImage to a tiff file.
 
@@ -1655,10 +1681,8 @@ class FibsemImage:
             path (path): path to save directory and filename
         """
         if path is None:
-            path = os.path.join(
-                self.metadata.image_settings.path,
-                self.metadata.image_settings.filename,
-            )
+            path = self.get_save_path()
+        
         os.makedirs(os.path.dirname(path), exist_ok=True)
         path = Path(path).with_suffix(".tif")
 
@@ -1672,51 +1696,51 @@ class FibsemImage:
             metadata=metadata_dict,
         )
 
-    if THERMO:
+    @classmethod
+    def fromAdornedImage(
+        cls,
+        adorned: AdornedImage,
+        image_settings: ImageSettings,
+        state: MicroscopeState = None,
+    ) -> "FibsemImage":
+        """Creates FibsemImage from an AdornedImage (microscope output format).
 
-        @classmethod
-        def fromAdornedImage(
-            cls,
-            adorned: AdornedImage,
-            image_settings: ImageSettings,
-            state: MicroscopeState = None,
-        ) -> "FibsemImage":
-            """Creates FibsemImage from an AdornedImage (microscope output format).
+        Args:
+            adorned (AdornedImage): Adorned Image from microscope
+            metadata (FibsemImageMetadata, optional): metadata extracted from microscope output. Defaults to None.
 
-            Args:
-                adorned (AdornedImage): Adorned Image from microscope
-                metadata (FibsemImageMetadata, optional): metadata extracted from microscope output. Defaults to None.
-
-            Returns:
-                FibsemImage: instance of FibsemImage from AdornedImage
-            """
-            if state is None:
-                state = MicroscopeState(
-                    timestamp=adorned.metadata.acquisition.acquisition_datetime,
-                    stage_position=FibsemStagePosition(
-                        adorned.metadata.stage_settings.stage_position.x,
-                        adorned.metadata.stage_settings.stage_position.y,
-                        adorned.metadata.stage_settings.stage_position.z,
-                        adorned.metadata.stage_settings.stage_position.r,
-                        adorned.metadata.stage_settings.stage_position.t,
-                    ),
-                    electron_beam=BeamSettings(beam_type=BeamType.ELECTRON),
-                    ion_beam=BeamSettings(beam_type=BeamType.ION),
-                )
-            else:
-                state.timestamp = adorned.metadata.acquisition.acquisition_datetime
-
-            pixel_size = Point(
-                adorned.metadata.binary_result.pixel_size.x,
-                adorned.metadata.binary_result.pixel_size.y,
+        Returns:
+            FibsemImage: instance of FibsemImage from AdornedImage
+        """
+        if state is None:
+            state = MicroscopeState(
+                timestamp=adorned.metadata.acquisition.acquisition_datetime,
+                stage_position=FibsemStagePosition(
+                    adorned.metadata.stage_settings.stage_position.x,
+                    adorned.metadata.stage_settings.stage_position.y,
+                    adorned.metadata.stage_settings.stage_position.z,
+                    adorned.metadata.stage_settings.stage_position.r,
+                    adorned.metadata.stage_settings.stage_position.t,
+                ),
+                electron_beam=BeamSettings(beam_type=BeamType.ELECTRON),
+                ion_beam=BeamSettings(beam_type=BeamType.ION),
             )
+        else:
+            # error here if using Demo2
+            state.timestamp = adorned.metadata.acquisition.acquisition_datetime
 
-            metadata = FibsemImageMetadata(
-                image_settings=image_settings,
-                pixel_size=pixel_size,
-                microscope_state=state,
-            )
-            return cls(data=adorned.data, metadata=metadata)
+        pixel_size = Point(
+            adorned.metadata.binary_result.pixel_size.x,
+            adorned.metadata.binary_result.pixel_size.y,
+        )
+
+
+        metadata = FibsemImageMetadata(
+            image_settings=image_settings,
+            pixel_size=pixel_size,
+            microscope_state=state,
+        )
+        return cls(data=adorned.data, metadata=metadata)
 
     if TESCAN:
 
