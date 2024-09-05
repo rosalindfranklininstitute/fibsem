@@ -23,8 +23,9 @@ patterns:
     cleaning_cross_section: False
     scan_direction: "ToptoBottom"
     passes: 0 # means auto
+    time: 0 # means auto
   Line:
-    start_x: 0.0
+    start_x: -10.0e-6
     start_y: 0.0
     end_x: 10.0e-6
     end_y: 0
@@ -41,6 +42,7 @@ patterns:
     size_ratio: 1.0
     depth: 2.0e-6
     cleaning_cross_section: false
+    time: 0 # means auto
   Horseshoe:
     lamella_width: 40.0e-6
     lamella_height: 10.0e-6
@@ -58,6 +60,23 @@ patterns:
     scan_direction: TopToBottom
     side_trench_width: 5.0e-06
     top_trench_height: 10.0e-6
+    inverted: False
+  SerialSection:
+    section_thickness: 4.0e-6
+    section_width: 50.0e-6
+    section_depth: 20.0e-6
+    side_width: 10.0e-6
+    side_depth: 40.0e-6
+    side_height: 10.0e-6
+    inverted: false
+  RectangleOffset: 
+    width: 10.0e-6
+    height: 5.0e-6
+    depth: 1.0e-6 
+    scan_direction: TopToBottom
+    cross_section: Rectangle
+    offset: 0.0e-6 
+    inverted: false
   Undercut: 
     height: 10.0e-6
     width: 10.0e-6
@@ -72,21 +91,14 @@ patterns:
     depth: 5.0e-6
     rotation: 45.0
     cleaning_cross_section: false
-  SpotWeld:
-    height: 1.0e-6
-    width: 5.0e-6
+  ArrayPattern:
+    height: 2.0e-6
+    width: 2.0e-6
     depth: 5.0e-6
-    distance: 2.0e-6
-    number: 3
-    rotation: 0.0
-    passes: 1
-    scan_direction: "LeftToRight"
-  SpotWeldVertical:
-    height: 5.0e-6
-    width: 0.5e-6
-    depth: 5.0e-6
-    distance: 2.0e-6
-    number: 3
+    n_columns: 5
+    n_rows: 5
+    pitch_vertical: 5.0e-6
+    pitch_horizontal: 5.0e-6
     rotation: 0.0
     passes: 1
     scan_direction: "ToptoBottom"

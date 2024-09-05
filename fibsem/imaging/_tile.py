@@ -23,7 +23,6 @@ def _tile_image_collection(microscope: FibsemMicroscope, settings: MicroscopeSet
     dy *= -1 # need to invert y-axis
 
     # fixed image settings
-    settings.image.dwell_time = 1e-6
     settings.image.autogamma = False
 
     logging.info(f"TILE COLLECTION: {settings.image.filename}")
@@ -137,7 +136,8 @@ def _stitch_images(images, ddict: dict, overlap=0, parent_ui = None) -> FibsemIm
 
     # for cryo need to histogram equalise
     if ddict.get("cryo", False):
-        image = acquire.auto_gamma(image, method="autogamma")
+        from fibsem.imaging.autogamma import auto_gamma
+        image = auto_gamma(image, method="autogamma")
 
     filename = os.path.join(image.metadata.image_settings.path, f'{ddict["prev-filename"]}-autogamma')
     image.save(filename)
@@ -209,6 +209,16 @@ def _calculate_repojection(image: FibsemImage, pos: FibsemStagePosition):
 
     pt_delta = Point(dx, dy)
     px_delta = pt_delta._to_pixels(image.metadata.pixel_size.x)
+
+    beam_type = image.metadata.image_settings.beam_type
+    if beam_type is BeamType.ELECTRON:
+        scan_rotation = image.metadata.microscope_state.electron_beam.scan_rotation
+    if beam_type is BeamType.ION:
+        scan_rotation = image.metadata.microscope_state.ion_beam.scan_rotation
+    
+    if np.isclose(scan_rotation, np.pi):
+        px_delta.x *= -1.0
+        px_delta.y *= -1.0
 
     image_centre = Point(x=image.data.shape[1]/2, y=image.data.shape[0]/2)
     point = image_centre + px_delta

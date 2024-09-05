@@ -16,6 +16,7 @@ from fibsem.segmentation import train as seg_train
 from fibsem.ui.qtdesigner_files import FibsemModelTrainingWidget
 import yaml
 from fibsem.segmentation.config import CLASS_COLORS
+from fibsem.ui.utils import _get_directory_ui,_get_file_ui
 
 
 # BASE_PATH = os.path.join(os.path.dirname(fibsem.__file__), "config")
@@ -40,6 +41,9 @@ class FibsemModelTrainingWidget(FibsemModelTrainingWidget.Ui_Form, QtWidgets.QWi
 
     def setup_connections(self):
         self.pushButton_train_model.clicked.connect(self.train_model)
+        self.dataPath_button.clicked.connect(self.select_filepath)
+        self.labelPath_button.clicked.connect(self.select_filepath)
+        self.outputPath_button.clicked.connect(self.select_filepath)
 
         self.comboBox_encoder.addItems(seg_utils.unet_encoders)
 
@@ -51,9 +55,9 @@ class FibsemModelTrainingWidget(FibsemModelTrainingWidget.Ui_Form, QtWidgets.QWi
 
         checkpoint = config["checkpoint"] if config["checkpoint"] is not None else ""
 
-        self.lineEdit_data_path.setText(config["data_path"])
-        self.lineEdit_label_path.setText(config["label_path"])
-        self.lineEdit_save_path.setText(config["path"])
+        self.lineEdit_data_path.setText(config["data_paths"][0])
+        self.lineEdit_label_path.setText(config["label_paths"][0])
+        self.lineEdit_save_path.setText(config["save_path"])
         self.comboBox_encoder.setCurrentText(config["encoder"])
         self.lineEdit_checkpoint.setText(checkpoint)
         self.spinBox_num_classes.setValue(config["num_classes"])
@@ -69,9 +73,9 @@ class FibsemModelTrainingWidget(FibsemModelTrainingWidget.Ui_Form, QtWidgets.QWi
         checkpoint = None if checkpoint == "" else checkpoint
 
         config = {
-            "data_path": self.lineEdit_data_path.text(),
-            "label_path": self.lineEdit_label_path.text(),
-            "path": self.lineEdit_save_path.text(),
+            "data_paths": [self.lineEdit_data_path.text()],
+            "label_paths": [self.lineEdit_label_path.text()],
+            "save_path": self.lineEdit_save_path.text(),
             "encoder": self.comboBox_encoder.currentText(),
             "checkpoint": checkpoint,
             "num_classes": int(self.spinBox_num_classes.value()),
@@ -88,6 +92,21 @@ class FibsemModelTrainingWidget(FibsemModelTrainingWidget.Ui_Form, QtWidgets.QWi
         worker = self.train_worker(config)
         worker.finished.connect(self.train_model_finished)
         worker.start()
+    
+    def select_filepath(self):
+
+        if self.sender() == self.dataPath_button:
+            path = _get_directory_ui(msg="Select Image Data Directory")
+            if path is not None and path != "":
+                self.lineEdit_data_path.setText(path)
+        elif self.sender() == self.labelPath_button:
+            path = _get_directory_ui(msg="Select Labels Directory")
+            if path is not None and path != "":
+                self.lineEdit_label_path.setText(path)
+        elif self.sender() == self.outputPath_button:
+            path = _get_directory_ui(msg="Select Checkpoint Directory")
+            if path is not None and path != "":
+                self.lineEdit_save_path.setText(path)
 
     @thread_worker
     def train_worker(self, config: dict):
@@ -113,10 +132,7 @@ class FibsemModelTrainingWidget(FibsemModelTrainingWidget.Ui_Form, QtWidgets.QWi
             optimizer,
             train_data_loader,
             val_data_loader,
-            epochs=config["epochs"],
-            save_dir=config["save_path"],
-            WANDB=config["wandb"],
-            ui=self.ui_signal,
+            config=config,
         )
 
     def train_model_yielded(self, info: dict):

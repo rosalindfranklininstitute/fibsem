@@ -52,9 +52,11 @@ class NeedleTip(Feature):
     px: Point = None
     color = "green"
     name: str = "NeedleTip"
+    class_id: int = 2
+    class_name: str = "manipulator"
 
     def detect(self, img: np.ndarray, mask: np.ndarray = None, point:Point=None) -> 'NeedleTip':
-        self.px = detect_needle_v5(mask)
+        self.px = detect_needle_v5(mask, idx=self.class_id, edge="right")
         return self.px
 
 @dataclass
@@ -63,12 +65,12 @@ class NeedleTipBottom(Feature):
     px: Point = None
     color = "green"
     name: str = "NeedleTipBottom"
+    class_id: int = 2
+    class_name: str = "manipulator"
 
     def detect(self, img: np.ndarray, mask: np.ndarray = None, point:Point=None) -> 'NeedleTip':
-        self.px = detect_needle_v5(mask, edge="bottom")
+        self.px = detect_needle_v5(mask, idx=self.class_id, edge="bottom")
         return self.px
-
-
 
 
 @dataclass
@@ -134,10 +136,12 @@ class LandingPost(Feature):
     px: Point = None
     color = "cyan"
     name: str = "LandingPost"
+    class_id: int = 3
+    class_name: str = "landing_post"
 
     def detect(self, img: np.ndarray, mask: np.ndarray = None, point:Point=None) -> 'LandingPost':
-        # self.px = detect_landing_post_v4(mask, point)
-        self.px = detect_landing_post_v3(img, landing_pt=None)
+        self.px = detect_landing_post_v4(mask, idx=self.class_id, point=point)
+        # self.px = detect_landing_post_v3(img, landing_pt=None)
         return self.px
 
 
@@ -147,9 +151,11 @@ class LandingGridCentre(Feature):
     px: Point = None
     color = "cyan"
     name: str = "LandingGridCentre"
+    class_id: int = 3
+    class_name: str = "landing_post"
 
     def detect(self, img: np.ndarray, mask: np.ndarray = None, point:Point=None) -> 'LandingGridCentre':
-        mask = mask == 3  
+        mask = mask == self.class_id  
         self.px = detect_centre_point(mask, threshold=500)
         return self.px
 
@@ -356,11 +362,12 @@ def detect_landing_post_v3(img: np.ndarray, landing_pt: Point = None, sigma=3) -
     px = detect_closest_edge_v2(edge, landing_pt)
     return px
 
+    
 # TODO: generalise this to detect any edge
-def detect_landing_post_v4(mask: np.ndarray, point: Point = None) -> Point:
+def detect_landing_post_v4(mask: np.ndarray, idx: int = 3, point: Point = None) -> Point:
     if point is None:
         point = Point(x=mask.shape[1] // 2, y=mask.shape[0] // 2)
-    idx = 3
+
     landing_mask = mask == idx
 
     # mask out outside 1/3
@@ -369,9 +376,9 @@ def detect_landing_post_v4(mask: np.ndarray, point: Point = None) -> Point:
     landing_mask[:, -idxs:] = False
 
     # get median edge to
-    px = detect_median_edge(landing_mask, edge="top")
+    # px = detect_median_edge(landing_mask, edge="top")
 
-    # px = detect_closest_edge_v2(landing_mask, point)
+    px = detect_closest_edge_v2(landing_mask, point)
     return px
 
 def detect_centre_point(mask: np.ndarray, threshold: int = 500) -> Point:
@@ -456,7 +463,7 @@ def detect_median_edge(mask: np.ndarray, edge: str, threshold: int = 250) -> Poi
             if edge == "bottom":
                 edge_px = Point(x=px, y=y_max)
         except:
-            pass
+            logging.warning(f"Error detecting edge: {e}")
     return Point(x=int(edge_px.x), y=int(edge_px.y))
 
 
@@ -668,6 +675,7 @@ class DetectedFeatures:
     _distance: Point = None
     _offset: Point = Point(0, 0)
     fibsem_image: FibsemImage = None
+    checkpoint: str = None
 
     @property
     def distance(self):
@@ -720,7 +728,7 @@ def detect_features(
     image: Union[np.ndarray, FibsemImage],
     model: SegmentationModel,
     features: tuple[Feature],
-    pixelsize: float,
+    pixelsize: float = None,
     filter: bool = True,
     point: Point = None
 ) -> DetectedFeatures:
@@ -731,10 +739,19 @@ def detect_features(
     else:
         fibsem_image = None
 
+    if pixelsize is None:
+        try:
+            pixelsize = image.metadata.pixel_size.x
+        except: # default (wrong value)
+            pixelsize = 25e-9
+        
     # model inference
     mask = model.inference(image, rgb=False)
-    rgb = model.postprocess(mask, model.num_classes)
-    mask = mask[0] # remove channel dim
+    if mask.ndim == 3:
+        rgb = model.postprocess(mask, model.num_classes)
+        mask = mask[0] # remove channel dim
+    else:
+        rgb = decode_segmap_v2(mask)
 
     # detect features
     features = detect_features_v2(img=image, 
@@ -748,7 +765,8 @@ def detect_features(
         mask=mask,
         rgb=rgb,
         pixelsize=pixelsize,
-        fibsem_image=fibsem_image
+        fibsem_image=fibsem_image,
+        checkpoint=model.checkpoint
     )
 
     # distance in metres (from centre)
@@ -769,6 +787,7 @@ def take_image_and_detect_features(
     
     from fibsem import acquire, utils
     from fibsem.segmentation.model import load_model
+    from fibsem import config as cfg
 
     if settings.image.reduced_area is not None:
         logging.info(
@@ -783,16 +802,15 @@ def take_image_and_detect_features(
     image = acquire.new_image(microscope, settings.image)
 
     # load model
-    from fibsem import config as cfg
-    ml_protocol = settings.protocol.get("ml", {})
-    checkpoint = ml_protocol.get("checkpoint", cfg.__DEFAULT_CHECKPOINT__)
+
+    checkpoint = settings.protocol["options"].get("checkpoint", cfg.__DEFAULT_CHECKPOINT__)
     model = load_model(checkpoint=checkpoint)
 
     if isinstance(point, FibsemStagePosition):
-        logging.info(f"Reprojecting point {point} to image coordinates...")
+        logging.debug(f"Reprojecting point {point} to image coordinates...")
         points = _tile._reproject_positions(image, [point], _bound=True)
         point = points[0] if len(points) == 1 else None
-        logging.info(f"Reprojected point: {point}")
+        logging.debug(f"Reprojected point: {point}")
 
     # detect features
     det = detect_features(

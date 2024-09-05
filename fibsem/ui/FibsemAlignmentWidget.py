@@ -8,7 +8,6 @@ from PyQt5 import QtWidgets
 import numpy as np
 from fibsem import alignment
 from fibsem.microscope import FibsemMicroscope, ThermoMicroscope, DemoMicroscope, TescanMicroscope
-from fibsem.patterning import FibsemMillingStage
 from fibsem.structures import (BeamType, MicroscopeSettings)
 from fibsem.ui.qtdesigner_files import CurrentAlignmentWidget
 from fibsem.ui import utils as ui_utils 
@@ -110,14 +109,18 @@ class FibsemAlignmentWidget(CurrentAlignmentWidget.Ui_BeamAlignment, QtWidgets.Q
             self.microscope.set("preset", self.comboBox_ref_current.currentText(), beam_type=BeamType.ION)        
         self.settings.image.beam_type = BeamType.ION
         self.ref_image = self.microscope.acquire_image(self.settings.image)
+
         self.update_viewer(self.ref_image.data, "Reference")
+
         if isinstance(self.microscope, ThermoMicroscope) or isinstance(self.microscope, DemoMicroscope):
             self.microscope.set("current", float(self.comboBox_aligned_current.currentText()), beam_type=BeamType.ION)
         elif isinstance(self.microscope, TescanMicroscope):
             self.microscope.set("preset", self.comboBox_aligned_current.currentText(), beam_type=BeamType.ION)
         self.settings.image.beam_type = BeamType.ION
         self.aligned_image = self.microscope.acquire_image(self.settings.image)
+
         self.update_viewer(self.aligned_image.data, "Aligned")
+
         self.pushButton_align_beam.setEnabled(True)
         self.pushButton_align_beam.setStyleSheet(_stylesheets._GREEN_PUSHBUTTON_STYLE)
 

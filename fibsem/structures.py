@@ -5,15 +5,16 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import Enum, auto
 from pathlib import Path
 from fibsem.config import SUPPORTED_COORDINATE_SYSTEMS
-from typing import Optional
+from typing import Optional, Union
 import numpy as np
 import tifffile as tff
 import fibsem
 from fibsem.config import METADATA_VERSION
 from abc import ABC, abstractmethod, abstractstaticmethod
+import logging
 
 try:
     from tescanautomation.Common import Document
@@ -34,13 +35,20 @@ try:
         ManipulatorPosition,
         Rectangle,
         StagePosition,
+        CompustagePosition,
     )
+    from autoscript_sdb_microscope_client.enumerations import CoordinateSystem
 
     THERMO = True
 except:
     THERMO = False
 
-
+try:
+    AdornedImage
+except NameError:
+    logging.info("AdornedImage  not defined. Defining it here")
+    import fibsem.spoof_adorned_image
+    AdornedImage=fibsem.spoof_adorned_image.SpoofAdornedImage
 
 # @patrickcleeve: dataclasses.asdict -> :(
 
@@ -122,6 +130,26 @@ class MovementMode(Enum):
     # Needle = 3
 
 
+class ImagingState:
+    IDLE = 0
+    ACQUIRING = 1
+    STOPPING = 2
+    PAUSED = 3
+    ERROR = 4
+
+class PatterningState:
+    IDLE = 0
+    PATTERNING = 1
+    STOPPING = 2
+    PAUSED = 3
+    ERROR = 4
+
+class ManipulatorState(Enum):
+    RETRACTED = 0
+    INSERTED = 1
+    MOVING = 2
+
+
 @dataclass
 class FibsemStagePosition:
     """Data class for storing stage position data.
@@ -137,8 +165,8 @@ class FibsemStagePosition:
     Methods:
         to_dict(): Convert the stage position object to a dictionary.
         from_dict(data: dict): Create a new stage position object from a dictionary.
-        to_autoscript_position(stage_tilt: float = 0.0) -> StagePosition: Convert the stage position to a StagePosition object that is compatible with Autoscript.
-        from_autoscript_position(position: StagePosition, stage_tilt: float = 0.0) -> None: Create a new FibsemStagePosition object from a StagePosition object that is compatible with Autoscript.
+        to_autoscript_position(compustage: bool) -> StagePosition: Convert the stage position to a StagePosition object that is compatible with Autoscript.
+        from_autoscript_position(position: StagePosition) -> None: Create a new FibsemStagePosition object from a StagePosition object that is compatible with Autoscript.
         to_tescan_position(stage_tilt: float = 0.0): Convert the stage position to a format that is compatible with Tescan.
         from_tescan_position(): Create a new FibsemStagePosition object from a Tescan-compatible stage position.
     """
@@ -185,24 +213,56 @@ class FibsemStagePosition:
 
     if THERMO:
 
-        def to_autoscript_position(self, stage_tilt: float = 0.0) -> StagePosition:
-            return StagePosition(
-                x=self.x,
-                y=self.y,  # / np.cos(stage_tilt),
-                z=self.z,  # / np.cos(stage_tilt),
-                r=self.r,
-                t=self.t,
-                coordinate_system=self.coordinate_system,
-            )
+        def to_autoscript_position(self, compustage: bool = False) -> Union[StagePosition, CompustagePosition]:
+            """Converts the stage position to a StagePosition object that is compatible with Autoscript.
+            Args:
+                compustage: bool = False: Whether or not the stage is a compustage.
+            Returns:
+                StagePosition / CompuStagePosition compatible with Autoscript.        
+            """
 
-        @classmethod
-        def from_autoscript_position(
-            cls, position: StagePosition, stage_tilt: float = 0.0
-        ) -> None:
+            # reference: SerialFIB Arctis Driver
+            # https://github.com/sklumpe/SerialFIB/blob/main/src/Arctis/ArctisDriver.py
+            if compustage:
+                stage_position = CompustagePosition(
+                    x=self.x,
+                    y=self.y,
+                    z=self.z,
+                    a=self.t,
+                    coordinate_system=CoordinateSystem.SPECIMEN,
+                )               
+                
+            else:
+                stage_position = StagePosition(
+                    x=self.x,
+                    y=self.y, 
+                    z=self.z,  
+                    r=self.r,
+                    t=self.t,
+                    coordinate_system=CoordinateSystem.RAW,
+                )
+        
+            return stage_position
+
+        @classmethod # TODO: convert this to staticmethod?
+        def from_autoscript_position(cls, position: Union[StagePosition, CompustagePosition]) -> 'FibsemStagePosition':
+            
+            # compustage position
+            if isinstance(position, CompustagePosition):
+                return cls(
+                    x=position.x,
+                    y=position.y,
+                    z=position.z,
+                    r=0.0,
+                    t=position.a,
+                    coordinate_system=CoordinateSystem.SPECIMEN,
+                )
+
+
             return cls(
                 x=position.x,
-                y=position.y,  # * np.cos(stage_tilt),
-                z=position.z,  # * np.cos(stage_tilt),
+                y=position.y,  
+                z=position.z,
                 r=position.r,
                 t=position.t,
                 coordinate_system=position.coordinate_system.upper(),
@@ -240,6 +300,13 @@ class FibsemStagePosition:
     def _scale_repr(self, scale: float, precision: int = 2):
         return f"x:{self.x*scale:.{precision}f}, y:{self.y*scale:.{precision}f}, z:{self.z*scale:.{precision}f}"
 
+    def is_close(self, pos2: 'FibsemStagePosition', tol: float = 1e-6) -> bool:
+        """Check if two positions are close to each other."""
+        return ((abs(self.x - pos2.x) < tol) and 
+                (abs(self.y - pos2.y) < tol) and 
+                (abs(self.z - pos2.z) < tol) and 
+                (abs(self.t - pos2.t) < tol) and 
+                (abs(self.r - pos2.r) < tol))
 
 
 @dataclass
@@ -771,327 +838,213 @@ class MicroscopeState:
             "timestamp": self.timestamp,
             "stage_position": self.stage_position.to_dict()
             if self.stage_position is not None
-            else "Not defined",
+            else None,
             "electron_beam": self.electron_beam.to_dict()
             if self.electron_beam is not None
-            else "Not defined",
+            else None,
             "ion_beam": self.ion_beam.to_dict()
             if self.ion_beam is not None
-            else "Not defined",
+            else None,
             "electron_detector": self.electron_detector.to_dict()
             if self.electron_detector is not None
-            else "Not defined",
+            else None,
             "ion_detector": self.ion_detector.to_dict()
             if self.ion_detector is not None
-            else "Not defined",
+            else None,
         }
 
         return state_dict
 
     @staticmethod
     def from_dict(state_dict: dict) -> "MicroscopeState":
+        
+        # beam, and detector settings are now optional
+        electron_beam, electron_detector = None, None
+        ion_beam, ion_detector = None, None
+
+        if state_dict.get("electron_beam", None) is not None:
+            electron_beam = BeamSettings.from_dict(state_dict["electron_beam"])
+        if state_dict.get("ion_beam", None) is not None:
+            ion_beam = BeamSettings.from_dict(state_dict["ion_beam"])
+        if state_dict.get("electron_detector", None) is not None:
+            electron_detector = FibsemDetectorSettings.from_dict(state_dict["electron_detector"])
+        if state_dict.get("ion_detector", None) is not None:
+            ion_detector = FibsemDetectorSettings.from_dict(state_dict["ion_detector"])
+
         microscope_state = MicroscopeState(
             timestamp=state_dict["timestamp"],
             stage_position=FibsemStagePosition.from_dict(
                 state_dict["stage_position"]
             ),
-            electron_beam=BeamSettings.from_dict(state_dict["electron_beam"]),
-            ion_beam=BeamSettings.from_dict(state_dict["ion_beam"]),
-            electron_detector=FibsemDetectorSettings.from_dict(
-                state_dict.get("electron_detector", {})
-            ),
-            ion_detector=FibsemDetectorSettings.from_dict(
-                state_dict.get("ion_detector", {})
-            ),
+            electron_beam=electron_beam,
+            ion_beam=ion_beam,
+            electron_detector=electron_detector,
+            ion_detector=ion_detector,
         )
 
         return microscope_state
 
 
-class FibsemPatternType(Enum):
-    Rectangle = 1
-    Line = 2
-    Circle = 3
-    Bitmap = 4
-    Annulus = 5
 
-# TODO: convert this to abc?
-class FibsemPattern:  # FibsemBasePattern
-    """
-    FibsemPattern is used to store all of the possible settings related to each pattern that may be drawn.
+########### Base Pattern Settings
+@dataclass
+class FibsemPatternSettings(ABC):
 
-    Args:
-        pattern (FibsemPatternType): Used to indicate which pattern is utilised. Currently either Rectangle or Line.
-        **kwargs: If FibsemPatternType.Rectangle
-                    width: float (m),
-                    height: float (m),
-                    depth: float (m),
-                    rotation: float = 0.0 (m),
-                    centre_x: float = 0.0 (m),
-                    centre_y: float = 0.0 (m),
-                    passes: float = 1.0,
-
-                If FibsemPatternType.Line
-                    start_x: float (m),
-                    start_y: float (m),
-                    end_x: float (m),
-                    end_y: float (m),
-                    depth: float (m),
-
-                If FibsemPatternType.Circle
-                    centre_x: float (m),
-                    centre_y: float (m),
-                    radius: float (m),
-                    depth: float (m),
-                    start_angle: float = 0.0 (degrees),
-                    end_angle: float = 360.0 (degrees),
-
-                if FibsemPatternType.Bitmap
-                    centre_x: float (m),
-                    centre_y: float (m),
-                    width: float (m),
-                    height: float (m),
-                    rotation: float = 0.0 (degrees),
-                    depth: float (m),
-                    path: str = path to image,
-    """
-
-    def __init__(self, pattern: FibsemPatternType = FibsemPatternType.Rectangle, **kwargs):
-        self.pattern = pattern
-        if pattern == FibsemPatternType.Rectangle:
-            self.width = kwargs["width"]
-            self.height = kwargs["height"]
-            self.depth = kwargs["depth"]
-            self.rotation = kwargs["rotation"] if "rotation" in kwargs else 0.0
-            self.centre_x = kwargs["centre_x"] if "centre_x" in kwargs else 0.0
-            self.centre_y = kwargs["centre_y"] if "centre_y" in kwargs else 0.0
-            self.scan_direction = (
-                kwargs["scan_direction"]
-                if "scan_direction" in kwargs
-                else "TopToBottom"
-            )
-            self.cleaning_cross_section = (
-                kwargs["cleaning_cross_section"]
-                if "cleaning_cross_section" in kwargs
-                else False
-            )
-            self.passes = kwargs["passes"] if "passes" in kwargs else None
-        elif pattern == FibsemPatternType.Line:
-            self.start_x = kwargs["start_x"]
-            self.start_y = kwargs["start_y"]
-            self.end_x = kwargs["end_x"]
-            self.end_y = kwargs["end_y"]
-            self.depth = kwargs["depth"]
-            self.rotation = kwargs["rotation"] if "rotation" in kwargs else 0.0
-            self.scan_direction = (
-                kwargs["scan_direction"]
-                if "scan_direction" in kwargs
-                else "TopToBottom"
-            )
-            self.cleaning_cross_section = (
-                kwargs["cleaning_cross_section"]
-                if "cleaning_cross_section" in kwargs
-                else False
-            )
-        elif pattern == FibsemPatternType.Circle:
-            self.centre_x = kwargs["centre_x"]
-            self.centre_y = kwargs["centre_y"]
-            self.radius = kwargs["radius"]
-            self.depth = kwargs["depth"]
-            self.start_angle = kwargs["start_angle"] if "start_angle" in kwargs else 0.0
-            self.end_angle = kwargs["end_angle"] if "end_angle" in kwargs else 360.0
-            self.rotation = kwargs["rotation"] if "rotation" in kwargs else 0.0
-            self.scan_direction = (
-                kwargs["scan_direction"]
-                if "scan_direction" in kwargs
-                else "TopToBottom"
-            )
-            self.cleaning_cross_section = (
-                kwargs["cleaning_cross_section"]
-                if "cleaning_cross_section" in kwargs
-                else False
-            )
-        elif pattern == FibsemPatternType.Bitmap:
-            self.centre_x = kwargs["centre_x"]
-            self.centre_y = kwargs["centre_y"]
-            self.width = kwargs["width"]
-            self.height = kwargs["height"]
-            self.rotation = kwargs["rotation"] if "rotation" in kwargs else 0.0
-            self.depth = kwargs["depth"]
-            self.scan_direction = (
-                kwargs["scan_direction"]
-                if "scan_direction" in kwargs
-                else "TopToBottom"
-            )
-            self.cleaning_cross_section = (
-                kwargs["cleaning_cross_section"]
-                if "cleaning_cross_section" in kwargs
-                else False
-            )
-            self.path = kwargs["path"]
-        elif pattern == FibsemPatternType.Annulus:
-            self.centre_x = kwargs["centre_x"]
-            self.centre_y = kwargs["centre_y"]
-            self.radius = kwargs["radius"]
-            self.thickness = kwargs["thickness"]
-            self.depth = kwargs["depth"]
-            self.start_angle = kwargs["start_angle"] if "start_angle" in kwargs else 0.0
-            self.end_angle = kwargs["end_angle"] if "end_angle" in kwargs else 360.0
-            self.scan_direction = (
-                kwargs["scan_direction"]
-                if "scan_direction" in kwargs
-                else "TopToBottom"
-            )
-            self.cleaning_cross_section = (
-                kwargs["cleaning_cross_section"]
-                if "cleaning_cross_section" in kwargs
-                else False
-            )
-
-    def __repr__(self) -> str:
-        if self.pattern == FibsemPatternType.Rectangle:
-            return f"FibsemPattern(pattern={self.pattern}, width={self.width}, height={self.height}, depth={self.depth}, rotation={self.rotation}, centre_x={self.centre_x}, centre_y={self.centre_y}, scan_direction={self.scan_direction}, cleaning_cross_section={self.cleaning_cross_section}, passes={self.passes})"
-        if self.pattern == FibsemPatternType.Line:
-            return f"FibsemPattern(pattern={self.pattern}, start_x={self.start_x}, start_y={self.start_y}, end_x={self.end_x}, end_y={self.end_y}, depth={self.depth}, rotation={self.rotation}, scan_direction={self.scan_direction}, cleaning_cross_section={self.cleaning_cross_section})"
-        if self.pattern is FibsemPatternType.Circle:
-            return f"FibsemPattern(pattern={self.pattern}, centre_x={self.centre_x}, centre_y={self.centre_y}, radius={self.radius}, depth={self.depth}, start_angle={self.start_angle}, end_angle={self.end_angle}, rotation={self.rotation}, scan_direction={self.scan_direction}, cleaning_cross_section={self.cleaning_cross_section})"
-        if self.pattern is FibsemPatternType.Bitmap:
-            return f"FibsemPattern(pattern={self.pattern}, centre_x={self.centre_x}, centre_y={self.centre_y}, width={self.width}, height={self.height}, depth={self.depth}, path={self.path})"
-        if self.pattern is FibsemPatternType.Annulus:
-            return f"FibsemPattern(pattern={self.pattern}, centre_x={self.centre_x}, centre_y={self.centre_y}, radius={self.radius}, thickness={self.thickness}, depth={self.depth}, start_angle={self.start_angle}, end_angle={self.end_angle}, scan_direction={self.scan_direction}, cleaning_cross_section={self.cleaning_cross_section})"
-
+    @abstractmethod
+    def to_dict(self) -> dict:
+        pass
+    
     @staticmethod
-    def from_dict(state_dict: dict) -> "FibsemPattern":
-        if state_dict["pattern"] == "Rectangle":
-            passes = state_dict.get("passes", 0)
-            passes = passes if passes is not None else 0
-            return FibsemPattern(
-                pattern=FibsemPatternType.Rectangle,
-                width=state_dict["width"],
-                height=state_dict["height"],
-                depth=state_dict["depth"],
-                rotation=state_dict["rotation"],
-                centre_x=state_dict["centre_x"],
-                centre_y=state_dict["centre_y"],
-                scan_direction=state_dict["scan_direction"],
-                cleaning_cross_section=state_dict["cleaning_cross_section"],
-                passes=int(passes),
-            )
-        elif state_dict["pattern"] == "Line":
-            return FibsemPattern(
-                pattern=FibsemPatternType.Line,
-                start_x=state_dict["start_x"],
-                start_y=state_dict["start_y"],
-                end_x=state_dict["end_x"],
-                end_y=state_dict["end_y"],
-                depth=state_dict["depth"],
-                rotation=state_dict.get("rotation", 0.0),
-                scan_direction=state_dict["scan_direction"],
-                cleaning_cross_section=state_dict["cleaning_cross_section"],
-            )
-        elif state_dict["pattern"] == "Circle":
-            return FibsemPattern(
-                pattern=FibsemPatternType.Circle,
-                centre_x=state_dict["centre_x"],
-                centre_y=state_dict["centre_y"],
-                radius=state_dict["radius"],
-                depth=state_dict["depth"],
-                start_angle=state_dict["start_angle"],
-                end_angle=state_dict["end_angle"],
-                rotation=state_dict["rotation"],
-                scan_direction=state_dict["scan_direction"],
-                cleaning_cross_section=state_dict["cleaning_cross_section"],
-            )
-        elif state_dict["pattern"] == "BitmapPattern":
-            return FibsemPattern(
-                pattern=FibsemPatternType.Bitmap,
-                centre_x=state_dict["centre_x"],
-                centre_y=state_dict["centre_y"],
-                width=state_dict["width"],
-                height=state_dict["height"],
-                depth=state_dict["depth"],
-                rotation=state_dict["rotation"],
-                path=state_dict["path"],
-            )
-        elif state_dict["pattern"] == "Annulus":
-            return FibsemPattern(
-                pattern=FibsemPatternType.Annulus,
-                centre_x=state_dict["centre_x"],
-                centre_y=state_dict["centre_y"],
-                radius=state_dict["radius"],
-                thickness=state_dict["thickness"],
-                depth=state_dict["depth"],
-                start_angle=state_dict["start_angle"],
-                end_angle=state_dict["end_angle"],
-                scan_direction=state_dict["scan_direction"],
-                cleaning_cross_section=state_dict["cleaning_cross_section"],
-            )
+    def from_dict(self, data: dict) -> "FibsemPatternSettings":
+        pass
+
+
+class CrossSectionPattern(Enum):
+    Rectangle  = auto()
+    RegularCrossSection = auto()
+    CleaningCrossSection = auto()
+
+@dataclass
+class FibsemRectangleSettings(FibsemPatternSettings):
+    width: float
+    height: float
+    depth: float
+    centre_x: float
+    centre_y: float
+    rotation: float = 0
+    cleaning_cross_section: bool = False
+    scan_direction: str = "TopToBottom"
+    cross_section: CrossSectionPattern = CrossSectionPattern.Rectangle
+    passes: int = 0
+    time: float = 0.0
 
     def to_dict(self) -> dict:
-        if self.pattern == FibsemPatternType.Rectangle:
-            return {
-                "pattern": "Rectangle",
-                "width": self.width,
-                "height": self.height,
-                "depth": self.depth,
-                "rotation": self.rotation,
-                "centre_x": self.centre_x,
-                "centre_y": self.centre_y,
-                "scan_direction": self.scan_direction,
-                "cleaning_cross_section": self.cleaning_cross_section,
-                "passes": self.passes,
-            }
-        elif self.pattern == FibsemPatternType.Line:
-            return {
-                "pattern": "Line",
-                "start_x": self.start_x,
-                "start_y": self.start_y,
-                "end_x": self.end_x,
-                "end_y": self.end_y,
-                "depth": self.depth,
-                "rotation": self.rotation,
-                "scan_direction": self.scan_direction,
-                "cleaning_cross_section": self.cleaning_cross_section,
-            }
-        elif self.pattern == FibsemPatternType.Circle:
-            return {
-                "pattern": "Circle",
-                "centre_x": self.centre_x,
-                "centre_y": self.centre_y,
-                "radius": self.radius,
-                "depth": self.depth,
-                "start_angle": self.start_angle,
-                "end_angle": self.end_angle,
-                "rotation": self.rotation,
-                "scan_direction": self.scan_direction,
-                "cleaning_cross_section": self.cleaning_cross_section,
-            }
-        elif self.pattern == FibsemPatternType.Bitmap:
-            return {
-                "pattern": "BitmapPattern",
-                "centre_x": self.centre_x,
-                "centre_y": self.centre_y,
-                "width": self.width,
-                "height": self.height,
-                "depth": self.depth,
-                "rotation": self.rotation,
-                "scan_direction": self.scan_direction,
-                "cleaning_cross_section": self.cleaning_cross_section,
-                "path": self.path,
-            }
-        elif self.pattern == FibsemPatternType.Annulus:
-            return {
-                "pattern": "Annulus",
-                "centre_x": self.centre_x,
-                "centre_y": self.centre_y,
-                "radius": self.radius,
-                "thickness": self.thickness,
-                "depth": self.depth,
-                "start_angle": self.start_angle,
-                "end_angle": self.end_angle,
-                "scan_direction": self.scan_direction,
-                "cleaning_cross_section": self.cleaning_cross_section,
-            }
+        return {
+            "width": self.width,
+            "height": self.height,
+            "depth": self.depth,
+            "rotation": self.rotation,
+            "centre_x": self.centre_x,
+            "centre_y": self.centre_y,
+            "cleaning_cross_section": self.cleaning_cross_section,
+            "scan_direction": self.scan_direction,
+            "cross_section": self.cross_section.name,
+            "passes": self.passes,
+            "time": self.time,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "FibsemRectangleSettings":
+        return FibsemRectangleSettings(
+            width=data["width"],
+            height=data["height"],
+            depth=data["depth"],
+            centre_x=data["centre_x"],
+            centre_y=data["centre_y"],
+            cleaning_cross_section=data.get("cleaning_cross_section", False),
+            rotation=data.get("rotation", 0),
+            scan_direction=data.get("scan_direction", "TopToBottom"),
+            cross_section=CrossSectionPattern[data.get("cross_section", "Rectangle")],
+            passes=data.get("passes", 0),
+            time=data.get("time", 0.0),
+        )
+
+@dataclass
+class FibsemLineSettings(FibsemPatternSettings):
+    start_x: float
+    end_x: float
+    start_y: float
+    end_y: float
+    depth: float
+
+    def to_dict(self) -> dict:
+        return {
+            "start_x": self.start_x,
+            "end_x": self.end_x,
+            "start_y": self.start_y,
+            "end_y": self.end_y,
+            "depth": self.depth,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "FibsemLineSettings":
+        return FibsemLineSettings(
+            start_x=data["start_x"],
+            end_x=data["end_x"],
+            start_y=data["start_y"],
+            end_y=data["end_y"],
+            depth=data["depth"],
+        )
+
+@dataclass
+class FibsemCircleSettings(FibsemPatternSettings):
+    radius: float
+    depth: float
+    centre_x: float
+    centre_y: float
+    thickness: float = 0
+    start_angle: float = 0.0
+    end_angle: float = 360.0
+    rotation: float = 0.0           # annulus -> thickness !=0
+
+    def to_dict(self) -> dict:
+        return {
+            "radius": self.radius,
+            "depth": self.depth,
+            "centre_x": self.centre_x,
+            "centre_y": self.centre_y,
+            "start_angle": self.start_angle,
+            "end_angle": self.end_angle,
+            "rotation": self.rotation,
+            "thickness": self.thickness,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "FibsemCircleSettings":
+        return FibsemCircleSettings(
+            radius=data["radius"],
+            depth=data["depth"],
+            centre_x=data["centre_x"],
+            centre_y=data["centre_y"],
+            start_angle=data.get("start_angle", 0),
+            end_angle=data.get("end_angle", 360),
+            rotation=data.get("rotation", 0),
+            thickness=data.get("thickness", 0),
+        )
+
+
+@dataclass
+class FibsemBitmapSettings(FibsemPatternSettings):
+    width: float
+    height: float
+    depth: float
+    rotation: float
+    centre_x: float
+    centre_y: float
+    path: str = None
+
+    def to_dict(self) -> dict:
+        return {
+            "width": self.width,
+            "height": self.height,
+            "depth": self.depth,
+            "rotation": self.rotation,
+            "centre_x": self.centre_x,
+            "centre_y": self.centre_y,
+            "path": self.path,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "FibsemBitmapSettings":
+        return FibsemBitmapSettings(
+            width=data["width"],
+            height=data["height"],
+            depth=data["depth"],
+            rotation=data["rotation"],
+            centre_x=data["centre_x"],
+            centre_y=data["centre_y"],
+            path=data["path"],
+        )
 
 
 @dataclass
@@ -1270,12 +1223,10 @@ class ManipulatorSystemSettings:
     enabled: bool
     rotation: bool
     tilt: bool
-    inserted: bool = False
 
     def to_dict(self):
         return {
             "enabled": self.enabled,
-            "inserted": self.inserted,
             "rotation": self.rotation,
             "tilt": self.tilt,
         }
@@ -1286,7 +1237,6 @@ class ManipulatorSystemSettings:
             enabled=settings["enabled"],
             rotation=settings["rotation"],
             tilt=settings["tilt"],
-            inserted=settings.get("inserted", False),
         )
 
 
@@ -1301,7 +1251,6 @@ class GISSystemSettings:
     def to_dict(self):
         return {
             "enabled": self.enabled,
-            "inserted": self.inserted,
             "multichem": self.multichem,
             "sputter_coater": self.sputter_coater,
         }
@@ -1312,7 +1261,6 @@ class GISSystemSettings:
             enabled=settings["enabled"],
             multichem=settings["multichem"],
             sputter_coater=settings["sputter_coater"],
-            inserted=settings.get("inserted", False),
         )
 
 import fibsem
@@ -1366,7 +1314,8 @@ class SystemSettings:
     ion: BeamSystemSettings
     manipulator: ManipulatorSystemSettings
     gis: GISSystemSettings
-    info: SystemInfo    
+    info: SystemInfo
+    demo2:dict
 
     def to_dict(self):
         return {
@@ -1376,6 +1325,7 @@ class SystemSettings:
             "manipulator": self.manipulator.to_dict(),
             "gis": self.gis.to_dict(),
             "info": self.info.to_dict(),
+            "demo2": self.demo2
         }
     
     @staticmethod
@@ -1392,6 +1342,7 @@ class SystemSettings:
             manipulator=ManipulatorSystemSettings.from_dict(settings["manipulator"]),
             gis=GISSystemSettings.from_dict(settings["gis"]),
             info=SystemInfo.from_dict(settings["info"]),
+            demo2=settings.get("demo2",None)
         )
 
 @dataclass
@@ -1674,16 +1625,22 @@ class FibsemImage:
     """
 
     def __init__(self, data: np.ndarray, metadata: FibsemImageMetadata = None):
-        if check_data_format(data):
-            if data.ndim == 3 and data.shape[2] == 1:
-                data = data[:, :, 0]
-            self.data = data
-        else:
+        # if check_data_format(data):
+        #     if data.ndim == 3 and data.shape[2] == 1:
+        #         data = data[:, :, 0]
+        #     self.data = data
+
+        logging.info(f"data.dtype:{data.dtype}, data.shape:{data.shape}, data.ndim:{data.ndim}")
+        self.data = data
+        if data.ndim == 3 and data.shape[2] == 1:
+            self.data = data[:, :, 0]
+
+        if self.data.ndim!=2 or not self.data.dtype in [np.uint8, np.uint16] :
             raise Exception("Invalid Data format for Fibsem Image")
+        
+        self.metadata = None
         if metadata is not None:
             self.metadata = metadata
-        else:
-            self.metadata = None
 
     @classmethod
     def load(cls, tiff_path: str) -> "FibsemImage":
@@ -1709,6 +1666,14 @@ class FibsemImage:
                 # traceback.print_exc()
         return cls(data=data, metadata=metadata)
 
+    def get_save_folder(self):
+        return self.metadata.image_settings.path
+    def get_save_path(self):
+        return os.path.join(
+                self.metadata.image_settings.path,
+                self.metadata.image_settings.filename
+            )
+
     def save(self, path: Path = None) -> None:
         """Saves a FibsemImage to a tiff file.
 
@@ -1716,10 +1681,8 @@ class FibsemImage:
             path (path): path to save directory and filename
         """
         if path is None:
-            path = os.path.join(
-                self.metadata.image_settings.path,
-                self.metadata.image_settings.filename,
-            )
+            path = self.get_save_path()
+        
         os.makedirs(os.path.dirname(path), exist_ok=True)
         path = Path(path).with_suffix(".tif")
 
@@ -1733,51 +1696,51 @@ class FibsemImage:
             metadata=metadata_dict,
         )
 
-    if THERMO:
+    @classmethod
+    def fromAdornedImage(
+        cls,
+        adorned: AdornedImage,
+        image_settings: ImageSettings,
+        state: MicroscopeState = None,
+    ) -> "FibsemImage":
+        """Creates FibsemImage from an AdornedImage (microscope output format).
 
-        @classmethod
-        def fromAdornedImage(
-            cls,
-            adorned: AdornedImage,
-            image_settings: ImageSettings,
-            state: MicroscopeState = None,
-        ) -> "FibsemImage":
-            """Creates FibsemImage from an AdornedImage (microscope output format).
+        Args:
+            adorned (AdornedImage): Adorned Image from microscope
+            metadata (FibsemImageMetadata, optional): metadata extracted from microscope output. Defaults to None.
 
-            Args:
-                adorned (AdornedImage): Adorned Image from microscope
-                metadata (FibsemImageMetadata, optional): metadata extracted from microscope output. Defaults to None.
-
-            Returns:
-                FibsemImage: instance of FibsemImage from AdornedImage
-            """
-            if state is None:
-                state = MicroscopeState(
-                    timestamp=adorned.metadata.acquisition.acquisition_datetime,
-                    stage_position=FibsemStagePosition(
-                        adorned.metadata.stage_settings.stage_position.x,
-                        adorned.metadata.stage_settings.stage_position.y,
-                        adorned.metadata.stage_settings.stage_position.z,
-                        adorned.metadata.stage_settings.stage_position.r,
-                        adorned.metadata.stage_settings.stage_position.t,
-                    ),
-                    electron_beam=BeamSettings(beam_type=BeamType.ELECTRON),
-                    ion_beam=BeamSettings(beam_type=BeamType.ION),
-                )
-            else:
-                state.timestamp = adorned.metadata.acquisition.acquisition_datetime
-
-            pixel_size = Point(
-                adorned.metadata.binary_result.pixel_size.x,
-                adorned.metadata.binary_result.pixel_size.y,
+        Returns:
+            FibsemImage: instance of FibsemImage from AdornedImage
+        """
+        if state is None:
+            state = MicroscopeState(
+                timestamp=adorned.metadata.acquisition.acquisition_datetime,
+                stage_position=FibsemStagePosition(
+                    adorned.metadata.stage_settings.stage_position.x,
+                    adorned.metadata.stage_settings.stage_position.y,
+                    adorned.metadata.stage_settings.stage_position.z,
+                    adorned.metadata.stage_settings.stage_position.r,
+                    adorned.metadata.stage_settings.stage_position.t,
+                ),
+                electron_beam=BeamSettings(beam_type=BeamType.ELECTRON),
+                ion_beam=BeamSettings(beam_type=BeamType.ION),
             )
+        else:
+            # error here if using Demo2
+            state.timestamp = adorned.metadata.acquisition.acquisition_datetime
 
-            metadata = FibsemImageMetadata(
-                image_settings=image_settings,
-                pixel_size=pixel_size,
-                microscope_state=state,
-            )
-            return cls(data=adorned.data, metadata=metadata)
+        pixel_size = Point(
+            adorned.metadata.binary_result.pixel_size.x,
+            adorned.metadata.binary_result.pixel_size.y,
+        )
+
+
+        metadata = FibsemImageMetadata(
+            image_settings=image_settings,
+            pixel_size=pixel_size,
+            microscope_state=state,
+        )
+        return cls(data=adorned.data, metadata=metadata)
 
     if TESCAN:
 
@@ -2000,3 +1963,28 @@ def check_data_format(data: np.ndarray) -> bool:
     if data.ndim == 3 and data.shape[2] == 1:
         data = data[:, :, 0]
     return data.ndim == 2 and data.dtype in [np.uint8, np.uint16]
+
+@dataclass
+class FibsemGasInjectionSettings:
+    port: str
+    gas: str
+    duration: float
+    insert_position: str = None # multichem only
+
+    @staticmethod
+    def from_dict(d: dict):
+        return FibsemGasInjectionSettings(
+            port=d["port"],
+            gas=d["gas"],
+            duration=d["duration"],
+            insert_position=d.get("insert_position", None),
+        )
+    
+    def to_dict(self):
+        return {
+            "port": self.port,
+            "gas": self.gas,
+            "duration": self.duration,
+            "insert_position": self.insert_position,
+        }
+

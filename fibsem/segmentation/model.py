@@ -1,16 +1,16 @@
-from typing import Optional, List
+from typing import Optional
+import logging
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 import segmentation_models_pytorch as smp
-from fibsem.segmentation.utils import decode_segmap
+from fibsem.segmentation.utils import decode_segmap, download_checkpoint
 
 from pathlib import Path
-from fibsem import config as cfg
 import os
-from huggingface_hub import hf_hub_download
+
 
 
 # NOTE: these models contain numeric training bugs that were fixed in later versions. For reproducibility, we need to re-implement the bug for these models...
@@ -42,6 +42,7 @@ class SegmentationModel:
     ) -> None:
         super().__init__()
 
+        self.checkpoint: str = checkpoint
         self.mode = mode
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.num_classes = num_classes
@@ -50,18 +51,34 @@ class SegmentationModel:
         if checkpoint in __DEPRECIATED_CHECKPOINTS__:
             self._fix_numeric_scaling = False
 
-        if "latest" in checkpoint:
-            use_v2 = True
         if use_v2:
             self.model = self.load_model_v2(checkpoint=checkpoint)
         else:
             self.load_model(checkpoint=checkpoint, encoder=encoder)
 
-
+    # TODO: deprecate this fully
     def load_model(self, checkpoint: Optional[str], encoder: str = "resnet18") -> None:
         """Load the model, and optionally load a checkpoint"""
-        self.model = self.load_encoder(encoder=encoder)
+
+        # show depreciation warning
+        print(f"WARNING: {checkpoint} is a depreciated checkpoint. Please use the latest checkpoint instead.")
+
+        self.model = smp.Unet(
+            encoder_name=encoder,
+            encoder_weights="imagenet",
+            in_channels=1,  # grayscale images
+            classes=self.num_classes,
+        )
+        self.model.to(self.device)        
+        
+        
         self.load_weights(checkpoint=checkpoint)
+        if checkpoint:
+            checkpoint = download_checkpoint(checkpoint)
+
+            self.checkpoint = checkpoint
+            checkpoint_state = torch.load(checkpoint, map_location=self.device)
+            self.model.load_state_dict(checkpoint_state)
         if self._fix_numeric_scaling:
             self.model.eval() # this causes a bug? why -> input needs to be scaled between 0-1
         if self.mode == "train":
@@ -69,12 +86,8 @@ class SegmentationModel:
 
     def load_model_v2(self, checkpoint: str):
 
-        if os.path.exists(checkpoint):
-            checkpoint = checkpoint
-        else:
-            REPO_ID = "patrickcleeve/openfibsem-baseline"
-            checkpoint = hf_hub_download(repo_id=REPO_ID, filename=checkpoint)
-        
+        # download checkpoint if needed
+        checkpoint = download_checkpoint(checkpoint)
         checkpoint_dict = torch.load(checkpoint, map_location=self.device)
 
         self.model = smp.Unet(
@@ -93,46 +106,19 @@ class SegmentationModel:
             self.model.train()
 
         # metadata
-        self.checkpoint = checkpoint
+        self.checkpoint = os.path.basename(checkpoint)
         self.num_classes = checkpoint_dict["nc"]
         self.encoder = checkpoint_dict["encoder"]
 
         return self.model
 
-    def load_encoder(self, encoder: str = "resnet18"):
-        model = smp.Unet(
-            encoder_name=encoder,
-            encoder_weights="imagenet",
-            in_channels=1,  # grayscale images
-            classes=self.num_classes,
-        )
-        model.to(self.device)
-        return model
-
-    def load_weights(self, checkpoint: Optional[str]):
-        if checkpoint:
-            
-            # check if checkpoint is an actual path, otherwise load from HF
-            if os.path.exists(checkpoint):
-                checkpoint = checkpoint
-            else:
-                REPO_ID = "patrickcleeve/openfibsem-baseline"
-                checkpoint = hf_hub_download(repo_id=REPO_ID, filename=checkpoint)
-
-            self.checkpoint = checkpoint
-            checkpoint_state = torch.load(checkpoint, map_location=self.device)
-            self.model.load_state_dict(checkpoint_state)
-
 
     def pre_process(self, img: np.ndarray) -> torch.Tensor:
         """Pre-process the image for inference"""
-        # print(img.min(), img.max(), img.dtype)
         img_t = torch.Tensor(img).float().to(self.device)
-        # print values range
-        # print(img_t.min(), img_t.max(), img_t.dtype)
+
         if self._fix_numeric_scaling:
             img_t /=  255.0 # scale float to 0 - 1
-        # print(img_t.min(), img_t.max(), img_t.dtype)
         if img_t.ndim == 2:
             img_t = img_t.unsqueeze(0).unsqueeze(0)  # add batch dim and channel dim
         elif img_t.ndim == 3:
@@ -140,6 +126,10 @@ class SegmentationModel:
                 img_t = img_t.unsqueeze(1)  # add channel dim
             else:
                 img_t = img_t.unsqueeze(0)  # add batch dim
+
+        assert img_t.ndim == 4, f"Expected 4 dims, got {img_t.ndim}"
+
+        logging.debug({"msg": "pre_process", "shape": img_t.shape, "dtype": img_t.dtype, "min": img_t.min(), "max": img_t.max()})
 
         return img_t
 
@@ -156,10 +146,28 @@ class SegmentationModel:
         if rgb:
             masks = self.postprocess(masks, nc=self.num_classes)
 
+        # TODO: return masks, scores, logits
         return masks
 
+    def inference_v2(self, img: np.ndarray, rgb: bool = True) -> np.ndarray:
+        """Run model inference on the input image"""
+        with torch.no_grad():
+            img_t = self.pre_process(img)
+
+            outputs = self.model(img_t)
+            outputs = F.softmax(outputs, dim=1)
+            masks = torch.argmax(outputs, dim=1).detach().cpu().numpy()
+        
+        # decode to rgb
+        if rgb:
+            masks = self.postprocess(masks, nc=self.num_classes)
+
+        # TODO: return masks, scores, logits
+        return masks, outputs
+        
     def postprocess(self, masks, nc):
         # TODO: vectorise this properly
+        # TODO: use decode_segmap_v2
         output_masks = []
         for i in range(len(masks)):
             output_masks.append(decode_segmap(masks[i], nc=nc))
@@ -175,6 +183,8 @@ def get_backend(checkpoint: str) -> str:
         return "nnunet"
     elif "onnx" in checkpoint:
         return "onnx"
+    elif "hf" in checkpoint or "transformers" in checkpoint or "segformer" in checkpoint:
+        return "huggingface"
     else:
         return "smp"
 
@@ -194,6 +204,9 @@ def load_model(
     elif backend == "onnx":
         from fibsem.segmentation.onnx_model import SegmentationModelONNX
         model = SegmentationModelONNX(checkpoint=checkpoint)
+    elif backend == "huggingface":
+        from fibsem.segmentation.hf_segmentation_model import SegmentationModelHuggingFace
+        model = SegmentationModelHuggingFace(checkpoint=checkpoint)
     else:
         model = SegmentationModel(checkpoint=checkpoint, encoder=encoder, num_classes=nc, _fix_numeric_scaling=_fix_numeric_scaling)
 

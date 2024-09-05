@@ -3,15 +3,15 @@ import os
 import sys
 import glob
 
+import yaml
 import fibsem
 import napari
 import napari.utils.notifications
 import numpy as np
-import tifffile as tff
 from PIL import Image
 from fibsem.ui.qtdesigner_files import FibsemLabellingUI
 from PyQt5 import QtWidgets
-from fibsem.segmentation.config import CLASS_COLORS, CLASS_LABELS, convert_color_names_to_rgb
+from fibsem.segmentation.config import CLASS_COLORS, CLASS_LABELS, convert_color_names_to_rgb, CLASS_CONFIG_PATH
 from fibsem.segmentation import utils as seg_utils
 
 from fibsem.ui.FibsemSegmentationModelWidget import FibsemSegmentationModelWidget
@@ -24,7 +24,7 @@ from typing import Any, Generator, Optional
 # setup a basic logger
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
-_DEBUG = True
+_DEBUG = False
 
 # new line char in html
 NL = "<br>"
@@ -90,6 +90,7 @@ INSTRUCTIONS = {
 CONFIGURATION = {
     "IMAGES": {
         "FILE_EXT": ".tif",
+        "SUPPORTED_FILE_EXT": [".tif", ".png", ".jpg", ".jpeg"]
     },
     "LABELS": {
         "COLOR_MAP": CLASS_COLORS,
@@ -158,7 +159,9 @@ class FibsemLabellingUI(FibsemLabellingUI.Ui_Dialog, QtWidgets.QDialog):
         self.pushButton_data_path.clicked.connect(self.select_filepath)
         self.pushButton_labels_path.clicked.connect(self.select_filepath)
         self.model_widget.checkpoint_seg_button.clicked.connect(self.select_filepath)
-
+        self.pushButton_data_config.clicked.connect(self.select_filepath)
+        self.lineEdit_data_config.setText(CLASS_CONFIG_PATH)
+        self.comboBox_data_file_ext.addItems(CONFIGURATION["IMAGES"]["SUPPORTED_FILE_EXT"])
 
         self.tabWidget.addTab(self.model_widget, "Model")
         
@@ -207,6 +210,17 @@ class FibsemLabellingUI(FibsemLabellingUI.Ui_Dialog, QtWidgets.QDialog):
             path = _get_file_ui(msg="Select Checkpoint File", _filter=None)
             if path is not None and path != "":
                 self.model_widget.lineEdit_checkpoint.setText(path)
+        elif self.sender() == self.pushButton_data_config:
+            path = _get_file_ui(msg="Select Configuration File", path=CLASS_CONFIG_PATH, _filter="*.yaml")
+            if path is not None and path != "":
+                self.lineEdit_data_config.setText(path)
+
+                with open(path) as f:
+                    CLASS_CONFIG = yaml.load(f, Loader=yaml.FullLoader) 
+
+                CONFIGURATION["LABELS"]["COLOR_MAP"] = CLASS_CONFIG["CLASS_COLORS"]
+                CONFIGURATION["LABELS"]["LABEL_MAP"] = CLASS_CONFIG["CLASS_LABELS"]
+
 
     def load_data(self):
         # read raw data
@@ -222,6 +236,7 @@ class FibsemLabellingUI(FibsemLabellingUI.Ui_Dialog, QtWidgets.QDialog):
             return
             
         # get filenames
+        CONFIGURATION["IMAGES"]["FILE_EXT"] = self.comboBox_data_file_ext.currentText()
         FILE_EXT = CONFIGURATION["IMAGES"]["FILE_EXT"]
         filenames = sorted(glob.glob(os.path.join(data_path, f"*{FILE_EXT}*")))
         if len(filenames) == 0:
@@ -384,7 +399,7 @@ class FibsemLabellingUI(FibsemLabellingUI.Ui_Dialog, QtWidgets.QDialog):
 
         if os.path.basename(fname) in os.listdir(os.path.join(self.labels_path)):
             label_fname = os.path.join(self.labels_path, os.path.basename(fname))
-            label_image = tff.imread(label_fname)
+            label_image = Image.open(label_fname).convert("L")
             label_image = np.array(label_image, dtype=np.uint8)
 
             msg = f"Loaded label image from {os.path.basename(label_fname)}"

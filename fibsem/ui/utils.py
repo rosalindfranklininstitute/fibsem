@@ -8,12 +8,16 @@ import numpy as np
 from PIL import Image
 
 from fibsem import constants, conversions
-from fibsem.structures import Point, FibsemImage, FibsemPattern, FibsemPatternType, FibsemRectangle
+from fibsem.structures import Point, FibsemImage, FibsemRectangle
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from PyQt5.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from fibsem.patterning import FibsemMillingStage
+from fibsem.structures import (FibsemPatternSettings, 
+                               FibsemRectangleSettings,  FibsemLineSettings, 
+                               FibsemCircleSettings, FibsemBitmapSettings)
+from fibsem.microscope import FibsemMicroscope
 import napari
 from fibsem.utils import load_yaml, save_yaml
 import fibsem.patterning as patterning
@@ -182,12 +186,17 @@ def set_arr_as_qlabel(
 
 
 def convert_pattern_to_napari_circle(
-    pattern_settings: FibsemPattern, image: FibsemImage
+    pattern_settings: FibsemCircleSettings, image: FibsemImage
 ):
+    
+    if not isinstance(pattern_settings, FibsemCircleSettings):
+        raise ValueError("Pattern is not a circle")
+    
     # image centre
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
     # pixel size
     pixelsize_x, pixelsize_y = image.metadata.pixel_size.x, image.metadata.pixel_size.y
+
 
     # pattern to pixel coords
     r = int(pattern_settings.radius / pixelsize_x)
@@ -203,17 +212,42 @@ def convert_pattern_to_napari_circle(
     return shape
 
 
+def convert_pattern_to_napari_line(
+    pattern_settings: FibsemLineSettings, image: FibsemImage
+) -> np.ndarray:
+    # image centre
+    icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
+    # pixel size
+    pixelsize_x, pixelsize_y = image.metadata.pixel_size.x, image.metadata.pixel_size.y
+    
+    # extract pattern information from settings
+    if not isinstance(pattern_settings, FibsemLineSettings):
+        raise ValueError("Pattern is not a line")
+
+    start_x = pattern_settings.start_x
+    start_y = pattern_settings.start_y
+    end_x = pattern_settings.end_x
+    end_y = pattern_settings.end_y
+
+    # pattern to pixel coords
+    px0 = int(icx + (start_x / pixelsize_x))
+    py0 = int(icy - (start_y / pixelsize_y))
+    px1 = int(icx + (end_x / pixelsize_x))
+    py1 = int(icy - (end_y / pixelsize_y))
+
+    # napari shape format [[y_start, x_start], [y_end, x_end]])
+    shape = [[py0, px0], [py1, px1]]
+    return shape
+
 def convert_pattern_to_napari_rect(
-    pattern_settings: FibsemPattern, image: FibsemImage
+    pattern_settings: FibsemRectangleSettings, image: FibsemImage
 ) -> np.ndarray:
     # image centre
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
     # pixel size
     pixelsize_x, pixelsize_y = image.metadata.pixel_size.x, image.metadata.pixel_size.y
     # extract pattern information from settings
-    from fibsem.structures import FibsemPatternType
-
-    if pattern_settings.pattern is FibsemPatternType.Line:
+    if isinstance(pattern_settings, FibsemLineSettings):
         pattern_width = pattern_settings.end_x - pattern_settings.start_x
         pattern_height = max(pattern_settings.end_y - pattern_settings.start_y, 0.5e-6)
         pattern_rotation = np.arctan2(
@@ -223,7 +257,7 @@ def convert_pattern_to_napari_rect(
         pattern_centre_y = (pattern_settings.end_y + pattern_settings.start_y) / 2
 
     
-    elif pattern_settings.pattern is FibsemPatternType.Annulus: #only used for out of bounds check
+    elif isinstance(pattern_settings, FibsemCircleSettings): #only used for out of bounds check
         pattern_width = 2*pattern_settings.radius
         pattern_height = 2*pattern_settings.radius
         pattern_centre_x = pattern_settings.centre_x
@@ -270,7 +304,7 @@ def create_crosshair_shape(centre_point: Point, image: FibsemImage,eb_image: Fib
 
     r_angles = [0,np.deg2rad(90)] #
     w = 40
-    h = 3
+    h = 1
     crosshair_shapes = []
 
     for r in r_angles:
@@ -299,7 +333,7 @@ def create_crosshair_shape(centre_point: Point, image: FibsemImage,eb_image: Fib
 
 
 def convert_bitmap_pattern_to_napari_image(
-        pattern_settings: FibsemPattern, image: FibsemImage
+        pattern_settings: FibsemBitmapSettings, image: FibsemImage
 ) -> np.ndarray:
     # image centre
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
@@ -326,8 +360,8 @@ def convert_bitmap_pattern_to_napari_image(
     
     return img_array, translate_position
 
-def convert_pattern_to_napari_image(pattern_settings: FibsemPattern, image: FibsemImage) -> np.ndarray:
-
+def convert_pattern_to_napari_image(pattern_settings: FibsemCircleSettings, image: FibsemImage) -> np.ndarray:
+    """Convert a circle pattern to a napari image. Note: annulus can only be plotted as image"""
     # image centre
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
     # pixel size
@@ -362,12 +396,13 @@ def _create_annulus_shape(width, height, inner_radius, outer_radius):
     donut = np.logical_and(distance < outer_radius, distance > inner_radius).astype(int)
     return donut
 
+IGNORE_SHAPES_LAYERS = ["ruler_line","crosshair","scalebar","scalebar_value", "label", "alignment_area"] # ignore these layers when removing all shapes
 
 def _remove_all_layers(viewer: napari.Viewer, layer_type = napari.layers.shapes.shapes.Shapes, _ignore: list[str] = []):
 
     # remove all shapes layers
     layers_to_remove = []
-    layers_to_ignore = ["ruler_line","crosshair","scalebar","scalebar_value", "label"] + _ignore
+    layers_to_ignore = IGNORE_SHAPES_LAYERS + _ignore
     for layer in viewer.layers:
 
         if layer.name in layers_to_ignore:
@@ -383,11 +418,11 @@ def _draw_patterns_in_napari(
     ib_image: FibsemImage,
     eb_image: FibsemImage,
     milling_stages: list[FibsemMillingStage],
+    draw_crosshair: bool = True,
 ):
 
     # colour wheel
     COLOURS = ["yellow", "cyan", "magenta", "lime", "orange", "hotpink", "green", "blue", "red", "purple"]
-    from fibsem.structures import FibsemPatternType
 
     # convert fibsem patterns to napari shapes
     import time
@@ -402,9 +437,10 @@ def _draw_patterns_in_napari(
         patterns = stage.pattern.patterns
         point = stage.pattern.point
         name = stage.name
+        is_line_pattern = False
 
         for pattern_settings in patterns:
-            if pattern_settings.pattern is FibsemPatternType.Bitmap:
+            if isinstance(pattern_settings, FibsemBitmapSettings):
                 if pattern_settings.path == None or pattern_settings.path == '':
                     continue
 
@@ -415,20 +451,27 @@ def _draw_patterns_in_napari(
                 shape_patterns = []
                 _ignore.append("bmp_Image")
                 continue
-            elif pattern_settings.pattern is FibsemPatternType.Annulus:
-                annulus_image, translate_position = convert_pattern_to_napari_image(pattern_settings=pattern_settings, image=ib_image)
-                if "annulus_Image" in viewer.layers:
-                    viewer.layers.remove(viewer.layers["annulus_Image"])
-                viewer.add_image(annulus_image,translate=translate_position,name="annulus_Image",blending="additive",colormap=COLOURS[i % len(COLOURS)],opacity=0.4)
-                shape_patterns = []
-                _ignore.append("annulus_Image")
-                continue
 
-            elif pattern_settings.pattern is FibsemPatternType.Circle:
-                shape = convert_pattern_to_napari_circle(pattern_settings=pattern_settings, image=ib_image)
+            elif isinstance(pattern_settings, FibsemCircleSettings):
+                if pattern_settings.thickness != 0:
+                    annulus_image, translate_position = convert_pattern_to_napari_image(pattern_settings=pattern_settings, image=ib_image)
+                    if "annulus_Image" in viewer.layers:
+                        viewer.layers.remove(viewer.layers["annulus_Image"])
+                    viewer.add_image(annulus_image,translate=translate_position,name="annulus_Image",blending="additive",colormap=COLOURS[i % len(COLOURS)],opacity=0.4)
+                    shape_patterns = []
+                    _ignore.append("annulus_Image")
+                    continue
+                else:
+                    shape = convert_pattern_to_napari_circle(pattern_settings=pattern_settings, image=ib_image)
+                    shape_types.append("ellipse")
+                    _ignore.append(name)
 
-                shape_types.append("ellipse")
+            elif isinstance(pattern_settings, FibsemLineSettings):
+                shape = convert_pattern_to_napari_line(pattern_settings=pattern_settings, image=ib_image)
+                shape_types.append("line")
                 _ignore.append(name)
+                is_line_pattern = True
+            
             else:
                 shape = convert_pattern_to_napari_rect(
                     pattern_settings=pattern_settings, image=ib_image
@@ -446,14 +489,15 @@ def _draw_patterns_in_napari(
 
         if len(shape_patterns) > 0:
             
-            crosshair_shapes = create_crosshair_shape(centre_point=point, image=ib_image, eb_image=eb_image)
-            crosshair_shape_types = ["rectangle","rectangle"]
-            shape_patterns += crosshair_shapes
-            shape_types += crosshair_shape_types
-
+            if draw_crosshair:
+                crosshair_shapes = create_crosshair_shape(centre_point=point, image=ib_image, eb_image=eb_image)
+                crosshair_shape_types = ["rectangle","rectangle"]
+                shape_patterns += crosshair_shapes
+                shape_types += crosshair_shape_types
 
             # _name = f"Stage {i+1:02d}"
             if name in viewer.layers:
+                viewer.layers[name].data = []
                 viewer.layers[name].data = shape_patterns
                 viewer.layers[name].shape_type = shape_types
                 viewer.layers[name].edge_color = COLOURS[i % len(COLOURS)]
@@ -469,6 +513,9 @@ def _draw_patterns_in_napari(
                     opacity=0.5,
                     blending="translucent",
                 )
+
+            if is_line_pattern:
+                viewer.layers[name].edge_width = 3
 
         t2 = time.time()
         # remove all un-updated layers (assume they have been deleted)        
@@ -499,6 +546,34 @@ def _display_logo(path, label, shape=[50, 50]):
     label.setScaledContents(True)
     label.setFixedSize(*shape)
     label.setPixmap(QtGui.QPixmap(path))
+
+
+def create_combobox_message_box(text: str, title: str, options: list, parent = None):
+    # create a q message box with combobox
+    msg = QtWidgets.QMessageBox(parent=parent)
+    msg.setIcon(QtWidgets.QMessageBox.Information)
+    msg.setText(text)
+    msg.setWindowTitle(title)
+    msg.setStandardButtons(QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
+
+    # create a combobox
+    combobox = QtWidgets.QComboBox(msg)
+    combobox.addItems(options)
+
+    # add combobox to message box
+    msg.layout().addWidget(combobox, 1, 1)
+
+    # show message box
+    msg.exec_()
+
+    # get the selected milling pattern
+
+    if msg.result() == QtWidgets.QMessageBox.Ok:
+        selected = combobox.currentText()
+
+        return selected
+    
+    return None
 
 
         
@@ -724,22 +799,6 @@ def _get_text_ui(
 
     return text, okPressed
 
-
-def import_milling_stages_yaml_file(path) -> list[FibsemMillingStage]:
-
-    stages = load_yaml(path)
-
-    milling_stages = []
-
-    for stage in stages:
-        milling_stage = FibsemMillingStage.from_dict(stages[stage])
-        pattern = patterning.get_pattern(milling_stage.pattern.name)
-        pattern.define(protocol=milling_stage.pattern.protocol,point=milling_stage.pattern.point)
-        milling_stage.pattern = pattern
-        milling_stages.append(milling_stage)
-
-    return milling_stages
-
 def _draw_milling_stages_on_image(image: FibsemImage, milling_stages: list[FibsemMillingStage], show: bool = True):
 
     viewer = napari.Viewer()
@@ -792,38 +851,40 @@ def _calculate_fiducial_area_v2(image: FibsemImage, fiducial_centre: Point, fidu
 
     return fiducial_area, flag
 
-
-def export_milling_stages_yaml(milling_stages: list[FibsemMillingStage]) -> None:
-
-    stages = {}
-
-    for stage in milling_stages:
-        stages[stage.name] = stage.to_dict()
-
-        if "required_keys" in stages[stage.name]["pattern"].keys():
-            del stages[stage.name]["pattern"]["required_keys"]
     
-    path = _get_save_file_ui(msg="Select a file", path=cfg.LOG_PATH, _filter="*.yaml")
+def show_information_dialog(microscope: FibsemMicroscope, parent=None):
+    import fibsem
+    
+    fibsem_version = fibsem.__version__
+    autolamella_version = "Not Installed"
+    try:
+        import autolamella
+        autolamella_version = autolamella.__version__
+    except:
+        pass
+    
+    info = microscope.system.info
 
-    if path == '':
-        napari.utils.notifications.show_info("No file selected, exiting")
-        return
+    text = f"""
+    OpenFIBSEM Information:
+    OpenFIBSEM: {fibsem_version}
+    AutoLamella: {autolamella_version}
 
-    save_yaml(path=path,data=stages)
-    napari.utils.notifications.show_info(f"Exported Milling stages to yaml file.")
+    Microscope Information:
+    Name: {info.name}
+    Manufacturer: {info.manufacturer}
+    Model: {info.model}
+    Serial Number: {info.serial_number}
+    Firmware Version: {info.hardware_version}
+    Software Version: {info.software_version}
+    """
 
+    # create a qdialog box with information
+    msg = QtWidgets.QMessageBox(parent=parent)
+    msg.setIcon(QtWidgets.QMessageBox.Information)
+    msg.setWindowTitle("Information")
+    msg.setText(text)
+    msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
 
-def import_milling_stages_yaml() -> list[FibsemMillingStage]:
-
-    stages = load_yaml(_get_file_ui(msg="Select a file", path=cfg.LOG_PATH, _filter="*.yaml"))
-
-    milling_stages = []
-
-    for stage in stages:
-        milling_stage = FibsemMillingStage.from_dict(stages[stage])
-        pattern = patterning.get_pattern(milling_stage.pattern.name)
-        pattern.define(protocol=milling_stage.pattern.protocol,point=milling_stage.pattern.point)
-        milling_stage.pattern = pattern
-        milling_stages.append(milling_stage)
-
-    return milling_stages
+    # exec
+    msg.exec_()

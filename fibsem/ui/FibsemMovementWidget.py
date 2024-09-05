@@ -60,8 +60,8 @@ class FibsemMovementWidget(FibsemMovementWidget.Ui_Form, QtWidgets.QWidget):
         self.image_widget.picture_signal.connect(self.update_ui)
         self.positions = []
         self.minimap_image = None
-        settings_dict = utils.load_yaml(cfg.SYSTEM_PATH)
-        if bool(settings_dict["load_positions_on_startup"]):
+        autoload_positions: bool = True # TODO: enable this
+        if autoload_positions:
             self.import_positions(cfg.POSITION_PATH)
         self.update_ui()
 
@@ -107,6 +107,24 @@ class FibsemMovementWidget(FibsemMovementWidget.Ui_Form, QtWidgets.QWidget):
         self.pushButton_update_position.setStyleSheet(_stylesheets._ORANGE_PUSHBUTTON_STYLE)
 
         self.movement_notification_signal.connect(self.update_moving_ui)
+
+        # set custom tilt limits for the compustage
+        if self.microscope is not None:
+            if self.microscope.stage_is_compustage:
+                self.doubleSpinBox_movement_stage_tilt.setMinimum(-195.0)
+                self.doubleSpinBox_movement_stage_tilt.setMaximum(15)
+
+                # NOTE: these values are expressed in mm in the UI, hence the conversion
+                # set x, y, z step sizes to be 1 um
+                self.doubleSpinBox_movement_stage_x.setSingleStep(1e-6 * constants.SI_TO_MILLI)
+                self.doubleSpinBox_movement_stage_y.setSingleStep(1e-6 * constants.SI_TO_MILLI)
+                self.doubleSpinBox_movement_stage_z.setSingleStep(1e-6 * constants.SI_TO_MILLI)
+
+                # TODO: get the true limits from the microscope
+                self.doubleSpinBox_movement_stage_x.setMinimum(-999.9e-6 * constants.SI_TO_MILLI)
+                self.doubleSpinBox_movement_stage_x.setMaximum(999.9e-6 * constants.SI_TO_MILLI)
+                self.doubleSpinBox_movement_stage_y.setMinimum(-377.8e-6 * constants.SI_TO_MILLI)
+                self.doubleSpinBox_movement_stage_y.setMaximum(377.8e-6 * constants.SI_TO_MILLI)
 
     def _toggle_interactions(self, enable: bool, caller: str = None):
         
@@ -333,7 +351,8 @@ class FibsemMovementWidget(FibsemMovementWidget.Ui_Form, QtWidgets.QWidget):
             napari.utils.notifications.show_info("No file selected, positions not saved")
             return
         
-        response = message_box_ui(text="Do you want to overwrite the file ? Click no to append the new positions to the existing file.", title="Overwrite ?", buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        response = message_box_ui(text="Do you want to overwrite the file ? Click no to append the new positions to the existing file.", 
+            title="Overwrite ?", buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         
         # save positions
         utils.save_positions(self.positions, path, overwrite=response)
@@ -351,16 +370,15 @@ class FibsemMovementWidget(FibsemMovementWidget.Ui_Form, QtWidgets.QWidget):
 
     def import_positions(self, path: str = None):
         if not isinstance(path, str):
-            protocol_path = _get_file_ui(msg="Select or create file")
-        else: 
-            protocol_path = path
-        if protocol_path == '':
+            path = _get_file_ui(msg="Select or create file")
+        if path == '':
             napari.utils.notifications.show_info("No file selected, positions not loaded")
             return
-        with open(protocol_path, "r") as f:
-            dict_positions = yaml.safe_load(f)
-        for dict_position in dict_positions:
-            position = FibsemStagePosition.from_dict(dict_position)
+        with open(path, "r") as f:
+            ddict = yaml.safe_load(f)
+        
+        for pdict in ddict:
+            position = FibsemStagePosition.from_dict(pdict)
             self.positions.append(position)
             self.comboBox_positions.addItem(position.name)
         self.minimap()

@@ -49,7 +49,6 @@ BASE_PATH = os.path.dirname(
     fibsem.__path__[0]
 )  # TODO: figure out a more stable way to do this
 CONFIG_PATH = os.path.join(BASE_PATH, "fibsem", "config")
-SYSTEM_PATH = os.path.join(CONFIG_PATH, "system.yaml")
 PROTOCOL_PATH = os.path.join(CONFIG_PATH, "protocol.yaml")
 LOG_PATH = os.path.join(BASE_PATH, "fibsem", "log")
 DATA_PATH = os.path.join(BASE_PATH, "fibsem", "log", "data")
@@ -61,6 +60,8 @@ MODELS_PATH = os.path.join(BASE_PATH, "fibsem", "segmentation", "models")
 MICROSCOPE_CONFIGURATION_PATH = os.path.join(
     CONFIG_PATH, "microscope-configuration.yaml"
 )
+
+
 
 os.makedirs(LOG_PATH, exist_ok=True)
 os.makedirs(DATA_PATH, exist_ok=True)
@@ -98,7 +99,6 @@ __DEFAULT_MANUFACTURER__ = "Thermo"
 __DEFAULT_IP_ADDRESS__ = "192.168.0.1"
 __SUPPORTED_PLASMA_GASES__ = ["Argon", "Oxygen", "Nitrogen", "Xenon"]
 
-__DEFAULT_CHECKPOINT__ = "autolamella-mega-20240107.pt"
 
 def get_default_user_config() -> dict:
     """Return the default configuration."""
@@ -186,7 +186,9 @@ DEFAULT_CONFIGURATION_VALUES = {
 }
 
 
-
+# machine learning
+HUGGINFACE_REPO = "patrickcleeve/autolamella"
+__DEFAULT_CHECKPOINT__ = "autolamella-mega-20240107.pt"
 
 
 
@@ -197,4 +199,20 @@ _LIVE_IMAGING_ENABLED = False
 _MINIMAP_VISUALISATION = False
 _MINIMAP_MOVE_WITH_TRANSLATION = False
 _MINIMAP_ACQUIRE_AFTER_MOVEMENT = False
-_APPLY_CONFIGURATION_ENABLED = False
+_APPLY_CONFIGURATION_ENABLED = True
+
+
+
+# tescan manipulator
+
+TESCAN_MANIPULATOR_CALIBRATION_PATH = os.path.join(CONFIG_PATH, "tescan_manipulator.yaml")
+
+def load_tescan_manipulator_calibration() -> dict:
+    """Load the tescan manipulator calibration"""
+    config = utils.load_yaml(cfg.TESCAN_MANIPULATOR_CALIBRATION_PATH)
+    return config
+
+def save_tescan_manipulator_calibration(config: dict) -> None:
+    """Save the tescan manipulator calibration"""
+    utils.save_yaml(cfg.TESCAN_MANIPULATOR_CALIBRATION_PATH, config)
+    return None

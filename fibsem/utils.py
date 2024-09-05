@@ -18,7 +18,6 @@ from fibsem.structures import (
     SystemSettings,
     FibsemImage,
     FibsemMillingSettings,
-    FibsemPattern,
 )
 from fibsem import config as cfg
 from fibsem.microscope import FibsemMicroscope
@@ -136,7 +135,7 @@ def create_gif(path: Path, search: str, gif_fname: str, loop: int = 0) -> None:
         loop=loop,
     )
 
-VALID_THERMO_FISHER = ["Thermo", "Thermo Fisher Scientific", "Thermo Fisher Scientific"]
+VALID_THERMO_FISHER = ["Thermo", "Thermo Fisher Scientific", "Thermo Fisher Scientific"] # needed repetition?
 VALID_TESCAN = ["Tescan", "TESCAN" ]
 
 def setup_session(
@@ -152,7 +151,7 @@ def setup_session(
 
     Args:
         session_path (Path): path to logging directory
-        config_path (Path): path to config directory (system.yaml)
+        config_path (Path): path to config directory 
         protocol_path (Path): path to protocol file
 
     Returns:
@@ -163,7 +162,7 @@ def setup_session(
     settings = load_microscope_configuration(config_path, protocol_path)
 
     # create session directories
-    session = f'{settings.protocol["name"]}_{current_timestamp()}'
+    session = f'{settings.protocol.get("name", "openfibsem")}_{current_timestamp()}'
     if protocol_path is None:
         protocol_path = os.getcwd()
 
@@ -205,6 +204,10 @@ def setup_session(
         microscope = fibsem_microscope.DemoMicroscope(settings.system)
         microscope.connect_to_microscope(ip_address, port=7520)
 
+    elif manufacturer == "Demo2":
+        microscope = fibsem_microscope.Demo2Microscope(settings.system)
+        microscope.connect_to_microscope(ip_address, port=7520)
+
     else:
         raise NotImplementedError(f"Manufacturer {manufacturer} not supported.")
     
@@ -233,7 +236,7 @@ def load_microscope_configuration(
         config_path = DEFAULT_CONFIGURATION_PATH
     
     # load config
-    config = load_yaml(os.path.join(config_path))
+    config = load_yaml(os.path.join(config_path)) #not sure what is joining here
 
     # load protocol
     protocol = load_protocol(protocol_path)
@@ -242,13 +245,6 @@ def load_microscope_configuration(
     settings = MicroscopeSettings.from_dict(config, protocol=protocol)
 
     return settings
-
-def apply_configuration(microscope: FibsemMicroscope, settings: MicroscopeSettings):
-    """Apply microscope settings to microscope"""
-    # beam_system settings
-    microscope.set_beam_system_settings(settings.system.electron)
-    microscope.set_beam_system_settings(settings.system.ion)
-
 
 def load_protocol(protocol_path: Path = None) -> dict:
     """Load the protocol file from yaml

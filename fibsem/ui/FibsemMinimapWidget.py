@@ -56,6 +56,7 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
 
         self.positions = []
         self._correlation = {}
+        self._correlation_mode: bool = False
 
         self._tile_info = {}
 
@@ -81,6 +82,7 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
 
         self.actionSave_Positions.triggered.connect(self._save_positions_pressed)
         self.actionLoad_Positions.triggered.connect(self._load_positions)
+        self.pushButton_enable_correlation.setStyleSheet(_stylesheets._GREEN_PUSHBUTTON_STYLE)
 
         # checkbox
         self.checkBox_options_move_with_translation.stateChanged.connect(self._update_ui)
@@ -92,18 +94,26 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
         # signals
         # self._stage_position_added.connect(self._position_added_callback)
         self._update_tile_collection.connect(self._update_tile_collection_callback)
-        self.parent._minimap_signal.connect(self.update_positions_from_parent)
+        if self.parent:
+            self.parent._minimap_signal.connect(self.update_positions_from_parent)
 
 
         # pattern overlay
-        self.comboBox_pattern_overlay.addItems([k for k in self.settings.protocol if "stages" in self.settings.protocol[k] or "type" in self.settings.protocol[k]])
+        milling_protocol = self.settings.protocol.get("milling", {})
+        milling_patterns = [k for k in milling_protocol if "stages" in milling_protocol[k] or "type" in milling_protocol[k]]
+        self.comboBox_pattern_overlay.addItems(milling_patterns)
+        if "trench" in milling_patterns:
+            self.comboBox_pattern_overlay.setCurrentText("trench")
+        elif "lamella" in milling_patterns:
+            self.comboBox_pattern_overlay.setCurrentText("lamella")
         self.comboBox_pattern_overlay.currentIndexChanged.connect(self._update_pattern_overlay)
         self.checkBox_pattern_overlay.stateChanged.connect(self._update_pattern_overlay)
 
         # correlation
         self.actionLoad_Correlation_Image.triggered.connect(self._load_correlation_image)
-        self.pushButton_update_correlation_image.clicked.connect(lambda: self._update_correlation_image(None))
         self.comboBox_correlation_selected_layer.currentIndexChanged.connect(self._update_correlation_ui)
+        self.pushButton_enable_correlation.clicked.connect(self._toggle_correlation_mode)
+        self.pushButton_enable_correlation.setEnabled(False) # disabled until correlation images added
 
         # auto update correlation image
         self.doubleSpinBox_correlation_translation_x.valueChanged.connect(self._update_correlation_data)
@@ -145,28 +155,31 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
 
     def run_tile_collection(self):
 
-        print("run_tile_collection")
-
-
+        logging.info("running tile collection")
 
         beam_type = BeamType[self.comboBox_tile_beam_type.currentText()]
         grid_size = self.doubleSpinBox_tile_grid_size.value() * constants.MICRO_TO_SI
         tile_size = self.doubleSpinBox_tile_tile_size.value() * constants.MICRO_TO_SI
         resolution = int(self.spinBox_tile_resolution.value())
+        dwell_time = self.doubleSpinBox_tile_dwell_time.value() * constants.MICRO_TO_SI
         cryo = self.checkBox_tile_autogamma.isChecked()
+        autocontrast = self.checkBox_tile_autogamma.isChecked()
+        path = self.lineEdit_tile_path.text()
+        filename = self.lineEdit_tile_filename.text()
 
         self._tile_info["grid_size"] = grid_size
         self._tile_info["tile_size"] = tile_size
         self._tile_info["resolution"] = resolution
         self._tile_info["beam_type"] = beam_type
-        
+                
+        self.settings.image.dwell_time = dwell_time 
         self.settings.image.hfw = tile_size
         self.settings.image.beam_type = beam_type
         self.settings.image.resolution = [resolution, resolution]
-        self.settings.image.autocontrast = self.checkBox_tile_autocontrast.isChecked()
+        self.settings.image.autocontrast = autocontrast
         self.settings.image.save = True
-        self.settings.image.path = self.lineEdit_tile_path.text()
-        self.settings.image.filename = self.lineEdit_tile_label.text() 
+        self.settings.image.path = path
+        self.settings.image.filename = filename
 
         if self.settings.image.filename == "":
             napari.utils.notifications.show_error(f"Please enter a filename for the image")
@@ -231,14 +244,14 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
             self.comboBox_correlation_selected_layer.clear()
             self.comboBox_correlation_selected_layer.addItems([layer.name for layer in self.viewer.layers if "correlation-image" in layer.name ])
             self.comboBox_correlation_selected_layer.currentIndexChanged.connect(self._update_correlation_ui)
+            # if no correlation layers left, disable enable correlation
+            if len(self.comboBox_correlation_selected_layer) == 0:
+                self.pushButton_enable_correlation.setEnabled(False)
 
 
     def _update_gridbar(self):
 
         pixel_size = self.image.metadata.pixel_size.x
-
-        print(f'pixel size: {pixel_size}')
-
 
         BAR_THICKNESS_PX = int(self.doubleSpinBox_gb_width.value() * constants.MICRO_TO_SI / pixel_size)
         BAR_SPACING_PX = int(self.doubleSpinBox_gb_spacing.value() * constants.MICRO_TO_SI / pixel_size)
@@ -446,10 +459,11 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
 
         if point is False: # clicked outside image
             return
-
+        
+        beam_type = self.image.metadata.image_settings.beam_type
         _new_position = self.microscope.project_stable_move( 
             dx=point.x, dy=point.y, 
-            beam_type=self.image.metadata.image_settings.beam_type, 
+            beam_type=beam_type, 
             base_position=self.image.metadata.microscope_state.stage_position)   
 
 
@@ -631,13 +645,12 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
             self._reprojection_layer.face_color= colors_rgba
 
 
-            _SHOW_PATTERNS:bool = self.checkBox_pattern_overlay.isChecked()
+            _SHOW_PATTERNS: bool = self.checkBox_pattern_overlay.isChecked()
             if _SHOW_PATTERNS: # TODO: this is very slow, need to speed up, too many pattern redraws
                 points = [conversions.image_to_microscope_image_coordinates(Point(x=coords[1], y=coords[0]), self.image.data, self.image.metadata.pixel_size.x ) for coords in data[:-1]]
-                # protocol = utils.load_yaml(r"/home/patrick/github/autolamella/autolamella/protocol/protocol.yaml")
                 pattern = self.comboBox_pattern_overlay.currentText() 
                 
-                milling_stages = [patterning.get_milling_stages(pattern, self.settings.protocol, Point(point.x, point.y))[0] for point in points]
+                milling_stages = [patterning.get_milling_stages(pattern, self.settings.protocol["milling"], Point(point.x, point.y))[0] for point in points]
                 
                 for stage, pos in zip(milling_stages, drawn_positions[:-1]):
                     stage.name = pos.name
@@ -702,12 +715,14 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
             self.comboBox_correlation_selected_layer.currentIndexChanged.connect(self._update_correlation_ui)
             
             self.viewer.layers.selection.active = self._image_layer
-    
+            self.pushButton_enable_correlation.setEnabled(True)
+
     # do this when image selected is changed
     def _update_correlation_ui(self):
 
         # set ui
         layer_name = self.comboBox_correlation_selected_layer.currentText()
+        self.pushButton_enable_correlation.setEnabled(layer_name != "")
         if layer_name == "":
             napari.utils.notifications.show_info(f"Please select a layer to correlate with  update data...")
             return
@@ -764,6 +779,38 @@ class FibsemMinimapWidget(FibsemMinimapWidget.Ui_MainWindow, QtWidgets.QMainWind
         self.viewer.layers[layer_name].translate = [corrected_ty, corrected_tx]
         self.viewer.layers[layer_name].scale = [sy, sx]
         self.viewer.layers[layer_name].rotate = r
+
+    def _toggle_correlation_mode(self):
+        
+        # toggle correlation mode
+        self._correlation_mode = not self._correlation_mode
+
+        if self._correlation_mode:
+            self.pushButton_enable_correlation.setStyleSheet(_stylesheets._ORANGE_PUSHBUTTON_STYLE)
+            self.pushButton_enable_correlation.setText("Disable Correlation Mode")
+            self.comboBox_correlation_selected_layer.setEnabled(False)
+        else:
+            self.pushButton_enable_correlation.setStyleSheet(_stylesheets._GREEN_PUSHBUTTON_STYLE)
+            self.pushButton_enable_correlation.setText("Enable Correlation Mode")
+            self.comboBox_correlation_selected_layer.setEnabled(True)
+
+        # if no correlation layer selected, disable the button
+        if self.comboBox_correlation_selected_layer.currentText() == "":
+            self.pushButton_enable_correlation.setEnabled(False)
+            return
+
+        # get current correlation layer
+        layer_name = self.comboBox_correlation_selected_layer.currentText()
+        correlation_layer = self.viewer.layers[layer_name]
+        
+        # set transformation mode on
+        if self._correlation_mode:
+            correlation_layer.mode = 'transform'
+            self.viewer.layers.selection.active = correlation_layer
+        else:
+            correlation_layer.mode = 'pan_zoom'
+            self.viewer.layers.selection.active = self._image_layer
+
 
 # TODO: update layer name, set from file?
 # TODO: set combobox to all images in viewer 

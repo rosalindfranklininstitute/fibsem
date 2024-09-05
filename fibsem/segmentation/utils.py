@@ -1,11 +1,20 @@
-from PIL import Image
-import glob
+
+
+
 import os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+
+from huggingface_hub import HfApi, hf_hub_download
+from fibsem import config as cfg
+
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+from fibsem.segmentation.config import CLASS_COLORS, CLASS_COLORS_RGB, CLASS_LABELS
+
 
 # helper functions
 def decode_output(output):
@@ -107,8 +116,6 @@ def show_values(ten):
     unq = np.unique(ten.detach().cpu().numpy())
     print(ten.shape, ten.min(), ten.max(), ten.mean(), ten.std(), unq)
 
-
-import os
 
 def validate_config(config:dict):
     if "data_paths" not in config:
@@ -235,3 +242,70 @@ unet_encoders = [
     "xception"
 ]
         
+
+def plot_segmentations(images: list[np.ndarray], masks: list[np.ndarray], 
+    alpha=0.5, legend: bool = True, show: bool = True) -> plt.Figure:
+    """Plot the image and mask overlaid with a class legend."""
+    
+    if not isinstance(images, list):
+        images = [images]
+    if not isinstance(masks, list):
+        masks = [masks]
+
+    if len(images) != len(masks):
+        raise ValueError("images and masks must be the same length")
+    
+    n_cols = len(images)
+    fig, ax = plt.subplots(1, len(images), figsize=(10*n_cols/2, 10*n_cols/2))
+    for i, (image, mask) in enumerate(zip(images, masks)):
+
+        # convert to rgb mask        
+        rgb = decode_segmap_v2(mask)
+
+        if len(images) == 1:
+            axes = ax
+        else:
+            axes = ax[i]
+        # plot
+        axes.imshow(image.data, cmap='gray')
+        axes.imshow(rgb, alpha=0.4)
+
+        # filter legend to only include classes present in mask
+        class_ids = np.unique(mask)
+        
+        colors, labels = [], []
+        for idx in class_ids:
+            colors.append(CLASS_COLORS[idx])
+            labels.append(CLASS_LABELS[idx])
+
+        # Create a patch for each class color
+        patches = [mpatches.Patch(color=color, label=label) 
+                for color, label in zip(colors, labels)]
+
+        # Add the patches to the legend
+        if legend:
+            axes.legend(handles=patches, loc="best", prop={'size': 6})
+    
+    if show:
+        plt.show()
+
+    return fig
+
+## Huggingface Utils
+
+def list_available_checkpoints():
+    api = HfApi()
+    files = api.list_repo_files(cfg.HUGGINFACE_REPO)
+    checkpoints = []
+    for file in files:
+        if file.endswith(".pt") and "archive" not in file:
+            checkpoints.append(file)
+
+    return checkpoints
+
+def download_checkpoint(checkpoint: str):
+    if os.path.exists(checkpoint):
+        checkpoint = checkpoint
+    else:
+        checkpoint = hf_hub_download(repo_id=cfg.HUGGINFACE_REPO, filename=checkpoint)
+    return checkpoint

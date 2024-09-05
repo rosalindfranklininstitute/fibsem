@@ -49,6 +49,7 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
         self._image_layer = None
         self._mask_layer = None
         self._features_layer = None
+        self._cross_hair_layer = None
 
         self.setup_connections()
 
@@ -136,6 +137,7 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
                     "is_correct": not np.any(px_diff),                          # is the feature correct    
                     "beam_type": beam_type.name,                                # beam type         
                     "pixelsize": self.det.pixelsize,                            # pixelsize
+                    "checkpoint": self.det.checkpoint,                          # checkpoint
             }
             logging.debug(msgd)
             fd.append(deepcopy(msgd))                                           # to write to disk
@@ -152,9 +154,14 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
                 self.viewer.layers.remove(self._mask_layer)
             if self._features_layer in self.viewer.layers:
                 self.viewer.layers.remove(self._features_layer)
+            if self._cross_hair_layer in self.viewer.layers:
+                self.viewer.layers.remove(self._cross_hair_layer)
 
         # reshow all other layers
+        excluded_layers = ["alignment_area"]
         for layer in self.viewer.layers:
+            if layer.name in excluded_layers:
+                continue
             layer.visible = True
         
         # reset camera
@@ -182,7 +189,7 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
         # add mask to viewer
         self._mask_layer = self.viewer.add_labels(self.det.mask, 
                                                     name="mask", 
-                                                    opacity=0.7,
+                                                    opacity=0.3,
                                                     blending="additive", 
                                                     color=CLASS_COLORS)
 
@@ -191,7 +198,6 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
         for feature in self.det.features:
             x, y = feature.px
             data.append([y, x])
-
 
         text = {
             "string": [feature.name for feature in self.det.features],
@@ -210,13 +216,19 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
             face_color=[feature.color for feature in self.det.features],
             blending="translucent",
         )
+
+        # draw cross hairs
+        self._cross_hair_layer = None
+        self._draw_crosshairs()
+
         # set points layer to select mode and active
+        self.viewer.layers.selection.active = self._features_layer
         self._features_layer.mode = "select"
         
         # when the point is moved update the feature
         self._features_layer.events.data.connect(self.update_point)
         self.update_info()
-        
+            
         # set camera
         self.prev_camera = deepcopy(self.viewer.camera)
         self.viewer.camera.center = [
@@ -226,6 +238,9 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
         ]
         self.viewer.camera.zoom = 0.7
 
+        if self.det.checkpoint:
+            self.label_model.setText(f"Checkpont: {os.path.basename(self.det.checkpoint)}")
+        
         napari.utils.notifications.show_info(f"Features ({', '.join([f.name for f in self.det.features])}) Detected")
 
     def update_info(self):
@@ -237,17 +252,17 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
         if len(self.det.features) == 1:
             self.label_info.setText(
             f"""{self.det.features[0].name}: {self.det.features[0].px}
-            \nUser Corrected: {self._USER_CORRECTED}
+            User Corrected: {self._USER_CORRECTED}
             """)
             return
         if len(self.det.features) == 2:
             self.label_info.setText(
                 f"""Moving 
-                \n{self.det.features[0].name}: {self.det.features[0].px}
-                \nto 
-                \n{self.det.features[1].name}: {self.det.features[1].px}
-                \ndx={self.det.distance.x*1e6:.2f}um, dy={self.det.distance.y*1e6:.2f}um
-                \nUser Corrected: {self._USER_CORRECTED}
+                {self.det.features[0].name}: {self.det.features[0].px}
+                to 
+                {self.det.features[1].name}: {self.det.features[1].px}
+                dx={self.det.distance.x*1e6:.2f}um, dy={self.det.distance.y*1e6:.2f}um
+                User Corrected: {self._USER_CORRECTED}
                 """
                 )
             return
@@ -283,10 +298,40 @@ class FibsemEmbeddedDetectionUI(FibsemEmbeddedDetectionWidget.Ui_Form, QtWidgets
                     x=data[idx][1], y=data[idx][0]
                 )
 
+        self._draw_crosshairs()
         self._USER_CORRECTED = True
         self.update_info()
 
 
+    def _draw_crosshairs(self):
+        """Draw crosshairs on the image"""
+
+        data = self._features_layer.data
+
+        # for each data point draw two lines from the edge of the image to the point
+        line_data, line_colors = [], []
+        for idx, point in enumerate(data):
+            y, x = point # already flipped
+            vline = [[y, 0], [y, self.det.image.data.shape[1]]]
+            hline = [[0, x], [self.det.image.data.shape[0], x]]
+            
+            line_data += [hline, vline]
+            color = self.det.features[idx].color
+            line_colors += [color, color]
+        try:
+            self._cross_hair_layer.data = line_data
+            self._cross_hair_layer.edge_color = line_colors
+        except:
+            self._cross_hair_layer = self.viewer.add_shapes(
+                data=line_data,
+                shape_type="line",
+                edge_width=3,
+                edge_color=line_colors,
+                name="feature_cross_hair",
+                opacity=0.7,
+                blending="additive",
+            )    
+    
     def _set_model(self, model: fibsem_model.SegmentationModel):
         self.model = model
         # update model info
@@ -315,12 +360,12 @@ def main():
     model = load_model(checkpoint=checkpoint)
     
     # load image
-    image = FibsemImage.load(os.path.join(os.path.dirname(detection.__file__), "test_image.tif"))
+    image = FibsemImage.load(os.path.join(os.path.dirname(detection.__file__), "test_image_2.tif"))
 
     pixelsize = image.metadata.pixel_size.x if image.metadata is not None else 25e-9
 
     # detect features
-    features = [detection.NeedleTip(), detection.LamellaCentre()]
+    features = [detection.LamellaRightEdge(), detection.LandingPost()]
     det = detection.detect_features(
         deepcopy(image.data), model, features=features, pixelsize=pixelsize
     )

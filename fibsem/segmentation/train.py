@@ -26,7 +26,7 @@ def _convert_checkpoint_format(checkpoint: str, encoder:str, nc: int, output_fil
     import torch
     from huggingface_hub import hf_hub_download
 
-    REPO_ID = "patrickcleeve/openfibsem-baseline"
+    REPO_ID = "patrickcleeve/autolamella"
     checkpoint = hf_hub_download(repo_id=REPO_ID, filename=checkpoint)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -187,6 +187,10 @@ def train_model(
     train_losses = []
     val_losses = []
 
+    # helps improve memory issues? 
+    # https://stackoverflow.com/questions/59129812/how-to-avoid-cuda-out-of-memory-in-pytorch
+    torch.cuda.empty_cache()
+
     # training loop
     for epoch in range(epochs):
         print(f"------- Epoch {epoch+1} of {epochs}  --------")
@@ -220,6 +224,7 @@ def _setup_model(config: dict) -> tuple:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
+
     # load model checkpoint
     if config["checkpoint"]:
         model.load_state_dict(torch.load(config["checkpoint"], map_location=device))
@@ -238,6 +243,7 @@ def _setup_dataset(config:dict):
         batch_size=config["batch_size"],
         val_split=config.get("split", 0.15),
         _validate_dataset=config.get("validate_dataset", True),
+        apply_transforms=config.get("apply_transforms", False),
     )
 
     return train_data_loader, val_data_loader
