@@ -115,7 +115,7 @@ class BasePattern(ABC):
     @abstractmethod
     def define(
         self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         pass
 
     def to_dict(self):
@@ -148,7 +148,7 @@ class BitmapPattern(BasePattern):
 
     def define(
             self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         protocol["centre_x"] = point.x
         protocol["centre_y"] = point.y
         protocol["pattern"] = "BitmapPattern"  
@@ -711,7 +711,7 @@ class MicroExpansionPattern(BasePattern):
             protocol (dict): Lamella protocol
 
         Returns:
-            patterns: list[FibsemPatternSettings]
+            patterns: list[FibsemPattern]
         """
         check_keys(protocol, self.required_keys)
 
@@ -909,7 +909,7 @@ class CloverPattern(BasePattern):
 
     def define(
         self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         check_keys(protocol, self.required_keys)
 
         radius = protocol["radius"]
@@ -964,7 +964,7 @@ class TriForcePattern(BasePattern):
 
     def define(
         self, protocol: dict, point: Point = Point()
-    ) -> list[FibsemPatternSettings]:
+    ) -> list[FibsemPattern]:
         check_keys(protocol, self.required_keys)
 
         height = protocol["height"]
@@ -1003,7 +1003,7 @@ class TrapezoidPattern(BasePattern):
     protocol = None
     point = None
 
-    def define(self, protocol: dict, point: Point = Point()) -> list[FibsemPatternSettings]:
+    def define(self, protocol: dict, point: Point = Point()) -> list[FibsemPattern]:
         check_keys(protocol, self.required_keys)
         self.patterns = []
         width_increments = (protocol["outer_width"] - protocol["inner_width"]) / (protocol["n_rectangles"]-1)

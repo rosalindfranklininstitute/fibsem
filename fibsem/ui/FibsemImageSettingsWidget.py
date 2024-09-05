@@ -576,7 +576,6 @@ class FibsemImageSettingsWidget(ImageSettingsWidget.Ui_Form, QtWidgets.QWidget):
         self.update_viewer(self.eb_last, BeamType.ELECTRON.name)
         self.update_viewer(self.ib_last, BeamType.ION.name)
 
-
     def update_viewer(self, arr: np.ndarray, name: str, _set_ui: bool = False):
         """Update the viewer with the given image array"""
 

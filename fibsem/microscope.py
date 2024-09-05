@@ -2681,7 +2681,6 @@ class ThermoMicroscope(FibsemMicroscope):
         if key == "hardware_version":
             return self.system.info.hardware_version
         
-
             
         # logging.warning(f"Unknown key: {key} ({beam_type})")
         return None    
@@ -6058,6 +6057,33 @@ class DemoMicroscope(FibsemMicroscope):
             else:
                 raise ValueError(f"Unknown beam type: {beam_type} for {key}")
             return
+        
+        if key == "stage_link":
+            logging.info(f"Linking stage...")
+            self.stage_system.is_linked = True
+            logging.info(f"Stage linked.")
+            return
+
+        # chamber properties
+        if key == "pump_chamber":
+            if value:
+                logging.info(f"Pumping chamber...")
+                self.chamber.state = "Pumped"
+                self.chamer.pressure = 1e-6 # 1 uTorr
+                logging.info(f"Chamber pumped.")
+            else:
+                logging.info(f"Invalid value for pump_chamber: {value}")
+            return
+        if key == "vent_chamber":
+            if value:
+                logging.info(f"Venting chamber...")
+                self.chamber.state = "Vented"
+                self.chamer.pressure = 1e5
+                logging.info(f"Chamber vented.")
+            else:
+                logging.info(f"Invalid value for vent_chamber: {value}")
+            return
+
 
         if key == "eucentric_height":
             if beam_type is BeamType.ELECTRON:
