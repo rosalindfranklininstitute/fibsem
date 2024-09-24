@@ -192,10 +192,6 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         # run milling
         self.pushButton_run_milling.clicked.connect(self.run_milling)
         self.pushButton_run_milling.setStyleSheet(_stylesheets._GREEN_PUSHBUTTON_STYLE)
-
-        # run adaptive polish
-        # self.pushButton_run_adaptive_polish.clicked.connect(self.run_adaptive_polish)
-        # self.pushButton_run_adaptive_polish.setStyleSheet(_stylesheets._YELLOW_PUSHBUTTON_STYLE)
         
         # stop milling
         self.pushButton_stop_milling.clicked.connect(self.stop_milling)
@@ -747,8 +743,6 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         self.pushButton_update_pattern.setEnabled(enabled)
         self.pushButton_add_milling_stage.setEnabled(enabled)
         self.pushButton_remove_milling_stage.setEnabled(enabled)
-        # self.pushButton_run_adaptive_polish.setEnabled(enabled)
-        # self.pushButton_save_milling_stage.setEnabled(enabled)
         self.pushButton_run_milling.setEnabled(enabled)
         if enabled:
             self.pushButton_run_milling.setStyleSheet(_stylesheets._GREEN_PUSHBUTTON_STYLE)
@@ -757,9 +751,6 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
             self.pushButton_add_milling_stage.setStyleSheet(_stylesheets._GREEN_PUSHBUTTON_STYLE)
             self.pushButton_remove_milling_stage.setStyleSheet(_stylesheets._RED_PUSHBUTTON_STYLE)
             self.pushButton_stop_milling.setVisible(False)
-            # self.pushButton_run_adaptive_polish.setStyleSheet(_stylesheets._YELLOW_PUSHBUTTON_STYLE)
-            # self.pushButton_run_adaptive_polish.setText("Run Adaptive Polish")
-            # self.pushButton_run_adaptive_polish.setVisible(True)
         elif milling:
             self.pushButton_run_milling.setStyleSheet(_stylesheets._ORANGE_PUSHBUTTON_STYLE)
             self.pushButton_run_milling.setText("Running...")
@@ -782,11 +773,6 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         worker = self.run_milling_step()
         worker.finished.connect(self.run_milling_finished)
         worker.start()
-    
-    # def run_adaptive_polish(self):
-    #     worker = self.run_adaptive_polish_step()
-    #     worker.finished.connect(self.run_milling_finished)
-    #     worker.start()
     
     def stop_milling(self):
         """Request milling stop."""
@@ -878,8 +864,8 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
 
             if "adaptive" in stage.name.lower():
 
-                from adaptive_polish import franklin_adaptive_milling_dl_fibsem2
-                ap2 = franklin_adaptive_milling_dl_fibsem2.AdaptiveMilling(self.adaptive_polish_settings)
+                from adaptive_polish import franklin_adaptive_milling_dl_fibsem
+                ap = franklin_adaptive_milling_dl_fibsem.AdaptiveMilling(self.adaptive_polish_settings)
                 
                 # does this actually need to be set here?
                 stage.milling.patterning_mode = "Parallel"
@@ -891,7 +877,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
                 log_status_message(stage, f"MILLING_SETTINGS_{stage.milling}")
                 log_status_message(stage, f"Patterning mode: {stage.milling.patterning_mode}")
                 
-                estimated_time = int(ap2.config_dict['milling_interval_s'])*int(ap2.config_dict['max_milling_cycles']) # TODO LMAP: TEST
+                estimated_time = int(ap.config_dict['milling_interval_s'])*int(ap.config_dict['max_milling_cycles']) # TODO LMAP: TEST
                 progress_bar_dict = {"estimated_time": estimated_time, "idx": idx, "total": len(milling_stages)}
                 self._progress_bar_start.emit(progress_bar_dict)
 
@@ -901,7 +887,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
                 #Note that the adaptive milling imaging settings were passed through the protocol dictionary
                 try:
                     # do not pass self.viewer to the line below, can'ts eem to get napari viewer to work in a separate thread
-                    ap2.adaptive_polish_run(self.microscope, self.settings, stage.pattern.patterns)
+                    ap.adaptive_polish_run(self.microscope, self.settings, stage.pattern.patterns)
                 
                 except Exception as e:
                     napari.utils.notifications.show_error(f"Error running milling stage: {stage.name}")
@@ -947,13 +933,6 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
 
             self.milling_notification.emit(f"Milling stage complete: {stage.name}")
         self.milling_notification.emit(f"Milling complete. {len(self.milling_stages)} stages completed.")
-
-
-    # @thread_worker
-    # def run_adaptive_polish_step(self):
-    #     from adaptive_polish import franklin_adaptive_milling_dl_fibsem
-    #     franklin_adaptive_milling_dl_fibsem.adaptive_polish_run(self.microscope, self.settings)
-
 
     def update_milling_ui(self, msg: str):
         logging.info(msg)
