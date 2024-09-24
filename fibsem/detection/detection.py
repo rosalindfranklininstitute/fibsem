@@ -322,7 +322,7 @@ class VolumeBlockBottomRightCorner(Feature):
 class AdaptiveLamellaCentre(Feature):
     feature_m: Point = None
     px: Point = None
-    color = "red"
+    color = "green"
     name: str = "AdaptiveLamellaCentre"
 
     def detect(self, img: np.ndarray, mask: np.ndarray = None, point:Point=None) -> 'AdaptiveLamellaCentre':
@@ -719,7 +719,7 @@ def detect_features_v2(
 
     for feature in features:
         
-        if isinstance(feature, (LamellaCentre, LamellaLeftEdge, LamellaRightEdge, LamellaTopEdge, LamellaBottomEdge, CoreFeature)):
+        if isinstance(feature, (LamellaCentre, LamellaLeftEdge, LamellaRightEdge, LamellaTopEdge, LamellaBottomEdge, CoreFeature, AdaptiveLamellaCentre)):
             feature = detect_multi_features(img, mask, feature)
             if filter:
                 feature = filter_best_feature(mask, feature, 
@@ -796,6 +796,7 @@ def take_image_and_detect_features(
     settings: MicroscopeSettings,
     features: tuple[Feature],
     point: Point = None,
+    checkpoint: str = None
 ) -> DetectedFeatures:
     
     from fibsem import acquire, utils
@@ -815,8 +816,8 @@ def take_image_and_detect_features(
     image = acquire.new_image(microscope, settings.image)
 
     # load model
-
-    checkpoint = settings.protocol["options"].get("checkpoint", cfg.__DEFAULT_CHECKPOINT__)
+    if checkpoint is None:
+        checkpoint = settings.protocol["options"].get("checkpoint", cfg.__DEFAULT_CHECKPOINT__)
     model = load_model(checkpoint=checkpoint)
 
     if isinstance(point, FibsemStagePosition):
@@ -824,6 +825,11 @@ def take_image_and_detect_features(
         points = _tile._reproject_positions(image, [point], _bound=True)
         point = points[0] if len(points) == 1 else None
         logging.debug(f"Reprojected point: {point}")
+
+    # bias the initial detection to the top third of the image
+    # TODO: remove this and use the external point correctly
+    if "gis_lamela" in checkpoint or "adaptive" in checkpoint:
+        point = Point(image.data.shape[1] // 2, image.data.shape[0] // 3)
 
     # detect features
     det = detect_features(
@@ -1033,7 +1039,10 @@ def mask_contours(image):
 from copy import deepcopy
 # TODO: need passthrough for the params
 def detect_multi_features(image: np.ndarray, mask: np.ndarray, feature: Feature, class_idx: int = 1):
-    
+
+    if isinstance(feature, AdaptiveLamellaCentre):
+        class_idx = 2
+
     mask = mask == class_idx # filter to class 
     mask = mask_contours(mask)
     idxs = np.unique(mask)
@@ -1045,7 +1054,7 @@ def detect_multi_features(image: np.ndarray, mask: np.ndarray, feature: Feature,
 
         # create a new image
         feature_mask = np.zeros_like(mask)
-        feature_mask[mask==idx] = 1
+        feature_mask[mask==idx] = class_idx
 
         # detect features
         feature.detect(image, feature_mask)
