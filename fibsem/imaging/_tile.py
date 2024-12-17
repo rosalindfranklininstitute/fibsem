@@ -1,17 +1,24 @@
-import glob
+
 import logging
 import os
+import time
 from copy import deepcopy
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage import transform
 
 from fibsem import acquire, conversions, utils
-from fibsem.structures import (BeamType, FibsemImage, FibsemImageMetadata, MicroscopeSettings,
-                               FibsemStagePosition, Point)
 from fibsem.microscope import FibsemMicroscope
-import time
+from fibsem.structures import (
+    BeamType,
+    FibsemImage,
+    FibsemStagePosition,
+    ImageSettings,
+    MicroscopeSettings,
+    Point,
+)
+
 
 def _tile_image_collection(microscope: FibsemMicroscope, settings: MicroscopeSettings, grid_size:float, 
     tile_size:float, overlap: float = 0.0, cryo: bool = True, parent_ui = None) -> dict: 
@@ -77,6 +84,10 @@ def _tile_image_collection(microscope: FibsemMicroscope, settings: MicroscopeSet
             settings.image.filename = f"tile_{i}_{j}"
             microscope.stable_move(dx=dx*(j!=0),  dy=0, beam_type=settings.image.beam_type) # dont move on the first tile?
 
+            if parent_ui:
+                if parent_ui.STOP_ACQUISITION:
+                    raise Exception("User Stopped Acquisition")
+
             logging.info(f"ACQUIRING IMAGE {i}, {j}")
             image = acquire.new_image(microscope, settings.image)
 
@@ -122,6 +133,9 @@ def _stitch_images(images, ddict: dict, overlap=0, parent_ui = None) -> FibsemIm
     #             parent_ui._update_tile_collection.emit({"msg": "Tile Stitched", "i": i, "j": j, 
     #                 "n_rows": n_rows, "n_cols": n_cols, "image": arr })
     
+    if parent_ui:
+        total = ddict["n_rows"] * ddict["n_cols"]
+        parent_ui._update_tile_collection.emit({"msg": "Stitching Tiles", "counter": total, "total": total})
     arr = ddict["stitched_image"]
 
     # convert to fibsem image
@@ -133,12 +147,10 @@ def _stitch_images(images, ddict: dict, overlap=0, parent_ui = None) -> FibsemIm
 
     filename = os.path.join(image.metadata.image_settings.path, f'{ddict["prev-filename"]}')
     image.save(filename)
-
     # for cryo need to histogram equalise
     if ddict.get("cryo", False):
         from fibsem.imaging.autogamma import auto_gamma
         image = auto_gamma(image, method="autogamma")
-
     filename = os.path.join(image.metadata.image_settings.path, f'{ddict["prev-filename"]}-autogamma')
     image.save(filename)
 
@@ -150,6 +162,7 @@ def _stitch_images(images, ddict: dict, overlap=0, parent_ui = None) -> FibsemIm
     ddict["start_state"] = ddict["start_state"].to_dict()
     filename = os.path.join(filename, f'{ddict["prev-filename"]}') # subdir
     utils.save_yaml(filename, ddict) 
+    # NOTE: saving the image / yaml is most time consuming
 
     return image
 
@@ -162,7 +175,7 @@ def _tile_image_collection_stitch(microscope, settings, grid_size, tile_size, ov
     return image
 
 
-def _stitch_arr(images:list[FibsemImage], dtype=np.uint8):
+def _stitch_arr(images:List[FibsemImage], dtype=np.uint8):
 
     arr = np.array(images)
     n_rows, n_cols = arr.shape[0], arr.shape[1]
@@ -229,7 +242,7 @@ def _calculate_repojection(image: FibsemImage, pos: FibsemStagePosition):
     return point
 
 
-def _reproject_positions(image:FibsemImage, positions: list[FibsemStagePosition], _bound: bool=False):
+def _reproject_positions(image:FibsemImage, positions: List[FibsemStagePosition], _bound: bool=False):
     # reprojection of positions onto image coordinates
     points = []
     for pos in positions:
@@ -271,7 +284,7 @@ def _reproject_positions(image:FibsemImage, positions: list[FibsemStagePosition]
 
 
 
-def _plot_positions(image: FibsemImage, positions: list[FibsemStagePosition], show:bool=False, minimap: bool=False, 
+def _plot_positions(image: FibsemImage, positions: List[FibsemStagePosition], show:bool=False, minimap: bool=False, 
     _clip: bool=False, _bound: bool= True) -> plt.Figure:
 
     points = _reproject_positions(image, positions)
@@ -327,7 +340,7 @@ def _convert_image_coord_to_position(microscope, settings, image, coords) -> Fib
     return _new_position
 
 
-def _convert_image_coords_to_positions(microscope, settings, image, coords) -> list[FibsemStagePosition]:
+def _convert_image_coords_to_positions(microscope, settings, image, coords) -> List[FibsemStagePosition]:
 
     positions = []
     for i, coord in enumerate(coords):
@@ -335,34 +348,33 @@ def _convert_image_coords_to_positions(microscope, settings, image, coords) -> l
         positions[i].name = f"Position {i:02d}"
     return positions
 
+# deprecated
+# def _minimap(minimap_image: FibsemImage, positions: List[FibsemStagePosition]):
+#         import matplotlib.pyplot as plt
+#         from matplotlib.backends.backend_agg import FigureCanvasAgg
+#         from PIL import Image
+#         from PyQt5.QtGui import QImage, QPixmap
+#         pil_image = None
 
-def _minimap(minimap_image: FibsemImage, positions: list[FibsemStagePosition]):
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_agg import FigureCanvasAgg
-        from PIL import Image
-        from PyQt5.QtGui import QImage, QPixmap
-        pil_image = None
+#         plt.close("all")
+#         fig = _plot_positions(image=minimap_image, positions = positions, minimap=True)
+#         plt.tight_layout(pad=0)
+#         canvas = FigureCanvasAgg(fig)
 
-        import matplotlib.pyplot as plt
-        plt.close("all")
-        fig = _plot_positions(image=minimap_image, positions = positions, minimap=True)
-        plt.tight_layout(pad=0)
-        canvas = FigureCanvasAgg(fig)
+#         # Render the figure onto the canvas
+#         canvas.draw()
 
-        # Render the figure onto the canvas
-        canvas.draw()
-
-        # Get the RGBA buffer from the canvas
-        buf = canvas.buffer_rgba()
-        # Convert the buffer to a PIL Image
-        pil_image = Image.frombuffer('RGBA', canvas.get_width_height(), buf, 'raw', 'RGBA', 0, 1)
-        pil_image = pil_image.resize((300, 300), Image.ANTIALIAS)
-        # Convert the PIL image to a QImage
-        image_qt = QImage(pil_image.tobytes(), pil_image.width, pil_image.height, QImage.Format_RGBA8888)
-        # Convert the QImage to a QPixmap 
-        qpixmap = QPixmap.fromImage(image_qt)
+#         # Get the RGBA buffer from the canvas
+#         buf = canvas.buffer_rgba()
+#         # Convert the buffer to a PIL Image
+#         pil_image = Image.frombuffer('RGBA', canvas.get_width_height(), buf, 'raw', 'RGBA', 0, 1)
+#         pil_image = pil_image.resize((300, 300), Image.ANTIALIAS)
+#         # Convert the PIL image to a QImage
+#         image_qt = QImage(pil_image.tobytes(), pil_image.width, pil_image.height, QImage.Format_RGBA8888)
+#         # Convert the QImage to a QPixmap 
+#         qpixmap = QPixmap.fromImage(image_qt)
         
-        return qpixmap
+#         return qpixmap
 
 
 
@@ -413,7 +425,9 @@ def _transform_position(pos: FibsemStagePosition):
 
     return transformed_position
 
-from fibsem.structures import ImageSettings
+
+
+
 def _update_image_region(microscope: FibsemMicroscope, image_settings: ImageSettings, image: FibsemImage, position: FibsemStagePosition) -> FibsemImage:
     
     region_image = acquire.new_image(microscope, image_settings)

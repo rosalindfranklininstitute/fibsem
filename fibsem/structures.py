@@ -8,19 +8,19 @@ from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
 from fibsem.config import SUPPORTED_COORDINATE_SYSTEMS
-from typing import Optional, Union
+from typing import Optional, Union, List, Tuple
 import numpy as np
 import tifffile as tff
 import fibsem
 from fibsem.config import METADATA_VERSION
-from abc import ABC, abstractmethod, abstractstaticmethod
+from abc import ABC, abstractmethod
 import logging
 
 try:
     from tescanautomation.Common import Document
 
     TESCAN = True
-except:
+except ImportError:
     TESCAN = False
 
 try:
@@ -40,7 +40,7 @@ try:
     from autoscript_sdb_microscope_client.enumerations import CoordinateSystem
 
     THERMO = True
-except:
+except ImportError:
     THERMO = False
 
 try:
@@ -130,16 +130,17 @@ class MovementMode(Enum):
     # Needle = 3
 
 
-class ImagingState:
+class ImagingState(Enum):
     IDLE = 0
-    ACQUIRING = 1
+    RUNNING = 1
     STOPPING = 2
     PAUSED = 3
     ERROR = 4
 
-class PatterningState:
+
+class PatterningState(Enum):
     IDLE = 0
-    PATTERNING = 1
+    RUNNING = 1
     STOPPING = 2
     PAUSED = 3
     ERROR = 4
@@ -218,7 +219,7 @@ class FibsemStagePosition:
             Args:
                 compustage: bool = False: Whether or not the stage is a compustage.
             Returns:
-                StagePosition / CompuStagePosition compatible with Autoscript.        
+                StagePosition / CompuStagePosition compatible with Autoscript.
             """
 
             # reference: SerialFIB Arctis Driver
@@ -230,23 +231,23 @@ class FibsemStagePosition:
                     z=self.z,
                     a=self.t,
                     coordinate_system=CoordinateSystem.SPECIMEN,
-                )               
-                
+                )
+
             else:
                 stage_position = StagePosition(
                     x=self.x,
-                    y=self.y, 
-                    z=self.z,  
+                    y=self.y,
+                    z=self.z,
                     r=self.r,
                     t=self.t,
                     coordinate_system=CoordinateSystem.RAW,
                 )
-        
+
             return stage_position
 
         @classmethod # TODO: convert this to staticmethod?
         def from_autoscript_position(cls, position: Union[StagePosition, CompustagePosition]) -> 'FibsemStagePosition':
-            
+
             # compustage position
             if isinstance(position, CompustagePosition):
                 return cls(
@@ -261,7 +262,7 @@ class FibsemStagePosition:
 
             return cls(
                 x=position.x,
-                y=position.y,  
+                y=position.y,
                 z=position.z,
                 r=position.r,
                 t=position.t,
@@ -302,10 +303,10 @@ class FibsemStagePosition:
 
     def is_close(self, pos2: 'FibsemStagePosition', tol: float = 1e-6) -> bool:
         """Check if two positions are close to each other."""
-        return ((abs(self.x - pos2.x) < tol) and 
-                (abs(self.y - pos2.y) < tol) and 
-                (abs(self.z - pos2.z) < tol) and 
-                (abs(self.t - pos2.t) < tol) and 
+        return ((abs(self.x - pos2.x) < tol) and
+                (abs(self.y - pos2.y) < tol) and
+                (abs(self.z - pos2.z) < tol) and
+                (abs(self.t - pos2.t) < tol) and
                 (abs(self.r - pos2.r) < tol))
 
 
@@ -478,6 +479,9 @@ class FibsemRectangle:
         @classmethod
         def __from_FEI__(cls, rect: Rectangle) -> "FibsemRectangle":
             return cls(rect.left, rect.top, rect.width, rect.height)
+
+
+
 
 
 @dataclass
@@ -719,7 +723,7 @@ class BeamSettings:
             shift = Point.from_dict(state_dict["shift"])
         else:
             shift = Point()
-        
+
         wd = state_dict.get("working_distance", state_dict.get("eucentric_height", None))
         current = state_dict.get("beam_current", state_dict.get("current", None))
 
@@ -857,7 +861,7 @@ class MicroscopeState:
 
     @staticmethod
     def from_dict(state_dict: dict) -> "MicroscopeState":
-        
+
         # beam, and detector settings are now optional
         electron_beam, electron_detector = None, None
         ion_beam, ion_detector = None, None
@@ -893,7 +897,7 @@ class FibsemPatternSettings(ABC):
     @abstractmethod
     def to_dict(self) -> dict:
         pass
-    
+
     @staticmethod
     def from_dict(self, data: dict) -> "FibsemPatternSettings":
         pass
@@ -917,6 +921,7 @@ class FibsemRectangleSettings(FibsemPatternSettings):
     cross_section: CrossSectionPattern = CrossSectionPattern.Rectangle
     passes: int = 0
     time: float = 0.0
+    is_exclusion: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -931,6 +936,7 @@ class FibsemRectangleSettings(FibsemPatternSettings):
             "cross_section": self.cross_section.name,
             "passes": self.passes,
             "time": self.time,
+            "is_exclusion": self.is_exclusion,
         }
 
     @staticmethod
@@ -947,6 +953,7 @@ class FibsemRectangleSettings(FibsemPatternSettings):
             cross_section=CrossSectionPattern[data.get("cross_section", "Rectangle")],
             passes=data.get("passes", 0),
             time=data.get("time", 0.0),
+            is_exclusion=data.get("is_exclusion", False),
         )
 
 @dataclass
@@ -986,6 +993,7 @@ class FibsemCircleSettings(FibsemPatternSettings):
     start_angle: float = 0.0
     end_angle: float = 360.0
     rotation: float = 0.0           # annulus -> thickness !=0
+    is_exclusion: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -997,6 +1005,7 @@ class FibsemCircleSettings(FibsemPatternSettings):
             "end_angle": self.end_angle,
             "rotation": self.rotation,
             "thickness": self.thickness,
+            "is_exclusion": self.is_exclusion,
         }
 
     @staticmethod
@@ -1010,6 +1019,7 @@ class FibsemCircleSettings(FibsemPatternSettings):
             end_angle=data.get("end_angle", 360),
             rotation=data.get("rotation", 0),
             thickness=data.get("thickness", 0),
+            is_exclusion=data.get("is_exclusion", False),
         )
 
 
@@ -1074,6 +1084,7 @@ class FibsemMillingSettings:
     preset: str = "30 keV; UHR imaging"
     spacing: float = 1.0
     milling_voltage: float = 30e3
+    milling_channel: BeamType = BeamType.ION
 
     def __post_init__(self):
         assert isinstance(
@@ -1114,6 +1125,7 @@ class FibsemMillingSettings:
             "preset": self.preset,
             "spacing": self.spacing,
             "milling_voltage": self.milling_voltage,
+            "milling_channel": self.milling_channel.name,
         }
 
         return settings_dict
@@ -1131,6 +1143,7 @@ class FibsemMillingSettings:
             preset=settings.get("preset", "30 keV; 1nA"),
             spacing=settings.get("spacing", 1.0),
             milling_voltage=settings.get("milling_voltage", 30e3),
+            milling_channel=BeamType[settings.get("milling_channel", "ION")],
         )
 
         return milling_settings
@@ -1159,7 +1172,7 @@ class StageSystemSettings:
             "rotation": self.rotation,
             "tilt": self.tilt,
         }
-    
+
     @staticmethod
     def from_dict(settings: dict):
         return StageSystemSettings(
@@ -1195,7 +1208,7 @@ class BeamSystemSettings:
         }
         ddict.update(self.beam.to_dict())
         ddict.update(self.detector.to_dict())
-        
+
         # rename keys to match config
         ddict["detector_mode"] = ddict.pop("mode")
         ddict["detector_type"] = ddict.pop("type")
@@ -1204,7 +1217,7 @@ class BeamSystemSettings:
         ddict["current"] = ddict.pop("beam_current")
 
         return ddict
-    
+
     @staticmethod
     def from_dict(settings: dict) -> 'BeamSystemSettings':
         return BeamSystemSettings(
@@ -1230,7 +1243,7 @@ class ManipulatorSystemSettings:
             "rotation": self.rotation,
             "tilt": self.tilt,
         }
-    
+
     @staticmethod
     def from_dict(settings: dict):
         return ManipulatorSystemSettings(
@@ -1254,7 +1267,7 @@ class GISSystemSettings:
             "multichem": self.multichem,
             "sputter_coater": self.sputter_coater,
         }
-    
+
     @staticmethod
     def from_dict(settings: dict):
         return GISSystemSettings(
@@ -1263,7 +1276,6 @@ class GISSystemSettings:
             sputter_coater=settings["sputter_coater"],
         )
 
-import fibsem
 
 @dataclass
 class SystemInfo:
@@ -1291,7 +1303,7 @@ class SystemInfo:
             "application": self.application,
             "application_version": self.application_version,
         }
-    
+
     @staticmethod
     def from_dict(settings: dict):
         return SystemInfo(
@@ -1304,7 +1316,7 @@ class SystemInfo:
             software_version=settings.get("software_version", "Unknown"),
             fibsem_version=settings.get("fibsem_version", fibsem.__version__),
             application=settings.get("application", None),
-            application_version=settings.get("application_version", None),  
+            application_version=settings.get("application_version", None),
         )
 
 @dataclass
@@ -1327,14 +1339,14 @@ class SystemSettings:
             "info": self.info.to_dict(),
             "demo2": self.demo2
         }
-    
+
     @staticmethod
     def from_dict(settings: dict):
 
         # TODO: remove this once the settings are updated
         settings["electron"]["beam_type"] = BeamType.ELECTRON.name
         settings["ion"]["beam_type"] = BeamType.ION.name
-            
+
         return SystemSettings(
             stage=StageSystemSettings.from_dict(settings["stage"]),
             electron=BeamSystemSettings.from_dict(settings["electron"]),
@@ -1381,10 +1393,10 @@ class MicroscopeSettings:
     def from_dict(
         settings: dict, protocol: dict = None
     ) -> "MicroscopeSettings":
-        
+
         if protocol is None:
             protocol = settings.get("protocol", {"name": "demo"})
-     
+
         return MicroscopeSettings(
             system=SystemSettings.from_dict(settings),
             image=ImageSettings.from_dict(settings["imaging"]),
@@ -1468,9 +1480,9 @@ class FibsemUser:
             hostname = socket.gethostname()
         else:
             hostname = "hostname"
-            
+
         user = FibsemUser(name=username, email="null", organization="null", hostname=hostname)
-        
+
         return user
 
 
@@ -1520,15 +1532,20 @@ class FibsemImageMetadata:
                 settings["microscope_state"]
             )
 
+        # the system settings are optional
+        system_dict = settings.get("system", {})
+        system_settings = None
+        if system_dict:
+            system_settings = SystemSettings.from_dict(system_dict)
+
         metadata = FibsemImageMetadata(
             image_settings=image_settings,
             version=version,
             pixel_size=pixel_size,
             microscope_state=microscope_state,
-            # detector_settings=detector_settings, # TODO: remove this
             user=FibsemUser.from_dict(settings.get("user", {})),
             experiment=FibsemExperiment.from_dict(settings.get("experiment", {})),
-            system=SystemSettings.from_dict(settings.get("system", {})),
+            system=system_settings
         )
         return metadata
 
@@ -1637,7 +1654,7 @@ class FibsemImage:
 
         if self.data.ndim!=2 or not self.data.dtype in [np.uint8, np.uint16] :
             raise Exception("Invalid Data format for Fibsem Image")
-        
+
         self.metadata = None
         if metadata is not None:
             self.metadata = metadata
@@ -1682,7 +1699,7 @@ class FibsemImage:
         """
         if path is None:
             path = self.get_save_path()
-        
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         path = Path(path).with_suffix(".tif")
 
@@ -1909,7 +1926,7 @@ class ReferenceImages:
     low_res_ib: FibsemImage
     high_res_ib: FibsemImage
 
-    def __iter__(self) -> list[FibsemImage]:
+    def __iter__(self) -> List[FibsemImage]:
         yield self.low_res_eb, self.high_res_eb, self.low_res_ib, self.high_res_ib
 
 
@@ -1979,7 +1996,7 @@ class FibsemGasInjectionSettings:
             duration=d["duration"],
             insert_position=d.get("insert_position", None),
         )
-    
+
     def to_dict(self):
         return {
             "port": self.port,
@@ -1988,3 +2005,35 @@ class FibsemGasInjectionSettings:
             "insert_position": self.insert_position,
         }
 
+
+def calculate_fiducial_area_v2(image: FibsemImage, fiducial_centre: Point, fiducial_length:float)->Tuple[FibsemRectangle, bool]:
+    from fibsem import conversions
+    pixelsize = image.metadata.pixel_size.x
+
+    fiducial_centre.y = -fiducial_centre.y
+    fiducial_centre_px = conversions.convert_point_from_metres_to_pixel(
+        fiducial_centre, pixelsize
+    )
+
+    rcx = fiducial_centre_px.x / image.metadata.image_settings.resolution[0] + 0.5
+    rcy = fiducial_centre_px.y / image.metadata.image_settings.resolution[1] + 0.5
+
+    fiducial_length_px = (
+        conversions.convert_metres_to_pixels(fiducial_length, pixelsize) * 1.5 # SCALE_FACTOR
+    )
+    h_offset = fiducial_length_px / image.metadata.image_settings.resolution[0] / 2
+    v_offset = fiducial_length_px / image.metadata.image_settings.resolution[1] / 2
+
+    left = rcx - h_offset
+    top = rcy - v_offset
+    width = 2 * h_offset
+    height = 2 * v_offset
+
+    if left < 0 or (left + width) > 1 or top < 0 or (top + height) > 1:
+        flag = True
+    else:
+        flag = False
+
+    fiducial_area = FibsemRectangle(left, top, width, height)
+
+    return fiducial_area, flag

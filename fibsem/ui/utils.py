@@ -6,6 +6,7 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from typing import List, Tuple
 
 from fibsem import constants, conversions
 from fibsem.structures import Point, FibsemImage, FibsemRectangle
@@ -14,13 +15,21 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from PyQt5.QtWidgets import QMessageBox, QSizePolicy, QVBoxLayout, QWidget
 from fibsem.patterning import FibsemMillingStage
-from fibsem.structures import (FibsemPatternSettings, 
-                               FibsemRectangleSettings,  FibsemLineSettings, 
+from fibsem.structures import (FibsemPatternSettings,
+                               FibsemRectangleSettings,  FibsemLineSettings,
                                FibsemCircleSettings, FibsemBitmapSettings)
 from fibsem.microscope import FibsemMicroscope
 import napari
 from fibsem.utils import load_yaml, save_yaml
 import fibsem.patterning as patterning
+from dataclasses import dataclass
+
+@dataclass
+class DrawnPattern:
+    pattern: np.ndarray
+    position: Point
+    is_exclusion: bool
+
 
 # # TODO: clean up and refactor these (_WidgetPlot and _PlotCanvas)
 # class _WidgetPlot(QWidget):
@@ -188,10 +197,10 @@ def set_arr_as_qlabel(
 def convert_pattern_to_napari_circle(
     pattern_settings: FibsemCircleSettings, image: FibsemImage
 ):
-    
+
     if not isinstance(pattern_settings, FibsemCircleSettings):
         raise ValueError("Pattern is not a circle")
-    
+
     # image centre
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
     # pixel size
@@ -219,7 +228,7 @@ def convert_pattern_to_napari_line(
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
     # pixel size
     pixelsize_x, pixelsize_y = image.metadata.pixel_size.x, image.metadata.pixel_size.y
-    
+
     # extract pattern information from settings
     if not isinstance(pattern_settings, FibsemLineSettings):
         raise ValueError("Pattern is not a line")
@@ -256,7 +265,7 @@ def convert_pattern_to_napari_rect(
         pattern_centre_x = (pattern_settings.end_x + pattern_settings.start_x) / 2
         pattern_centre_y = (pattern_settings.end_y + pattern_settings.start_y) / 2
 
-    
+
     elif isinstance(pattern_settings, FibsemCircleSettings): #only used for out of bounds check
         pattern_width = 2*pattern_settings.radius
         pattern_height = 2*pattern_settings.radius
@@ -343,13 +352,13 @@ def convert_bitmap_pattern_to_napari_image(
     resize_x = int(pattern_settings.width / pixelsize_x)
     resize_y = int(pattern_settings.height / pixelsize_y)
 
-    
+
     image_bmp = Image.open(pattern_settings.path)
     image_resized = image_bmp.resize((resize_x, resize_y))
     image_rotated = image_resized.rotate(-pattern_settings.rotation, expand=True)
     img_array = np.array(image_rotated)
 
-    pattern_centre_x = int(icx - pattern_settings.width/pixelsize_x/2) + image.data.shape[1] 
+    pattern_centre_x = int(icx - pattern_settings.width/pixelsize_x/2) + image.data.shape[1]
     pattern_centre_y = int(icy - pattern_settings.height/pixelsize_y/2)
 
     pattern_point_x = int(pattern_centre_x + pattern_settings.centre_x / pixelsize_x)
@@ -357,35 +366,134 @@ def convert_bitmap_pattern_to_napari_image(
 
     translate_position = (pattern_point_y,pattern_point_x)
 
-    
+
     return img_array, translate_position
 
-def convert_pattern_to_napari_image(pattern_settings: FibsemCircleSettings, image: FibsemImage) -> np.ndarray:
-    """Convert a circle pattern to a napari image. Note: annulus can only be plotted as image"""
-    # image centre
+def draw_annulus_shape(pattern_settings: FibsemCircleSettings, image: FibsemImage) -> DrawnPattern:
+    """Convert an annulus pattern to a np array. Note: annulus can only be plotted as image
+    Args:
+        pattern_settings: FibsemCircleSettings: Annulus pattern settings.
+        image: FibsemImage: Image to draw pattern on.
+    Returns:
+        np.ndarray: Annulus shape in image.
+        Point: Position of the annulus in the image.
+    """
+
+    # image parameters (centre, pixel size)
     icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
-    # pixel size
     pixelsize_x, pixelsize_y = image.metadata.pixel_size.x, image.metadata.pixel_size.y
 
-    resize_x = int(2*pattern_settings.radius / pixelsize_x)
-    resize_y = int(2*pattern_settings.radius / pixelsize_y)
+    # pattern parameters
+    radius = pattern_settings.radius
+    thickness = pattern_settings.thickness
+    center_x = pattern_settings.centre_x
+    center_y = pattern_settings.centre_y
 
-    
-    inner_radius_ratio = (pattern_settings.radius - pattern_settings.thickness)/pattern_settings.radius
+    radius_px = radius / pixelsize_x # isotropic
+    shape = int(2 * radius_px)
+    inner_radius_ratio = 0 # full circle
+    if not np.isclose(thickness, 0):
+        inner_radius_ratio = (radius - thickness)/radius
 
-    annulus_shape = _create_annulus_shape(width=resize_x, height=resize_y, inner_radius=inner_radius_ratio, outer_radius=1)
-    # annulus_image = np.array(image_rotated)
+    annulus_shape = _create_annulus_shape(width=shape, height=shape,
+                                          inner_radius=inner_radius_ratio,
+                                          outer_radius=1)
 
-    pattern_centre_x = int(icx - pattern_settings.radius/pixelsize_x) + image.data.shape[1] 
-    pattern_centre_y = int(icy - pattern_settings.radius/pixelsize_y)
+    # get pattern centre in image coordinates
+    pattern_centre_x = int(icx + center_x / pixelsize_x)
+    pattern_centre_y = int(icy - center_y / pixelsize_y)
 
-    pattern_point_x = int(pattern_centre_x + pattern_settings.centre_x / pixelsize_x)
-    pattern_point_y = int(pattern_centre_y - pattern_settings.centre_y / pixelsize_y)
+    pos = Point(x=pattern_centre_x, y=pattern_centre_y)
 
-    translate_position = (pattern_point_y,pattern_point_x)
+    return DrawnPattern(pattern=annulus_shape, position=pos, is_exclusion=pattern_settings.is_exclusion)
 
-    return annulus_shape, translate_position
-   
+
+def draw_rectangle_shape(pattern_settings: FibsemRectangleSettings, image: FibsemImage) -> DrawnPattern:
+    """Convert a rectangle pattern to a np array.
+    Args:
+        pattern_settings: FibsemRectangleSettings: Rectangle pattern settings.
+        image: FibsemImage: Image to draw pattern on.
+    Returns:
+        np.ndarray: Rectangle shape in image.
+        Point: Position of the rectangle in the image.
+    """
+    # TODO: support rotation for drawing rectangles
+
+    # image parameters (centre, pixel size)
+    icy, icx = image.data.shape[0] // 2, image.data.shape[1] // 2
+    pixelsize_x, pixelsize_y = image.metadata.pixel_size.x, image.metadata.pixel_size.y
+
+    # pattern parameters
+    width = pattern_settings.width
+    height = pattern_settings.height
+    centre_x = pattern_settings.centre_x
+    centre_y = pattern_settings.centre_y
+    rotation = pattern_settings.rotation
+
+    # pattern to pixel coords
+    w = int(width / pixelsize_x)
+    h = int(height / pixelsize_y)
+    cx = int(icx + (centre_x / pixelsize_y))
+    cy = int(icy - (centre_y / pixelsize_y))
+
+    #
+    shape = np.ones((h, w))
+    shape[:h, :w] = 1
+
+    # get pattern centre in image coordinates
+    pos = Point(x=cx, y=cy)
+
+    return DrawnPattern(pattern=shape, position=pos, is_exclusion=pattern_settings.is_exclusion)
+
+def draw_pattern_shape(ps, image):
+    if isinstance(ps, FibsemCircleSettings):
+        return draw_annulus_shape(ps, image)
+    elif isinstance(ps, FibsemRectangleSettings):
+        return draw_rectangle_shape(ps, image)
+    else:
+        raise ValueError(f"Unsupported shape type {type(ps)}")
+
+def draw_pattern_in_image(image: np.ndarray,
+                          drawn_pattern: DrawnPattern) -> np.ndarray:
+
+    pattern = drawn_pattern.pattern
+    pos = drawn_pattern.position
+
+    # place the annulus shape in the image
+    w = pattern.shape[1] // 2
+    h = pattern.shape[0] // 2
+
+    # fill the annulus shape in the image
+    xmin, xmax = pos.x - w, pos.x + w
+    ymin, ymax = pos.y - h, pos.y + h
+    zero_image = np.zeros_like(image)
+    zero_image[ymin:ymax, xmin:xmax] = pattern[:2*h, :2*w].astype(bool)
+
+    # if the pattern is an exclusion, set the image to zero
+    if drawn_pattern.is_exclusion:
+        image[zero_image == 1] = 0
+    else:
+        # add the annulus shape to the image, clip to 1
+        image = np.clip(image+zero_image, 0, 1)
+
+    return image
+
+
+def compose_pattern_image(image: np.ndarray, drawn_patterns: List[DrawnPattern]) -> np.ndarray:
+    """Create an image with annulus shapes."""
+    # create an empty image
+    pattern_image = np.zeros_like(image)
+
+    # sort drawn_patterns so that exclusions are drawn last
+    drawn_patterns = sorted(drawn_patterns, key=lambda x: x.is_exclusion)
+
+    # add each pattern shape to the image
+    for dp in drawn_patterns:
+        pattern_image = draw_pattern_in_image(pattern_image, dp)
+
+    return pattern_image
+
+
 def _create_annulus_shape(width, height, inner_radius, outer_radius):
     # Create a grid of coordinates
     x = np.linspace(-1, 1, width)
@@ -393,12 +501,13 @@ def _create_annulus_shape(width, height, inner_radius, outer_radius):
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     # Generate the donut shape
-    donut = np.logical_and(distance < outer_radius, distance > inner_radius).astype(int)
+    donut = np.logical_and(distance <= outer_radius, distance >= inner_radius).astype(int)
     return donut
 
 IGNORE_SHAPES_LAYERS = ["ruler_line","crosshair","scalebar","scalebar_value", "label", "alignment_area"] # ignore these layers when removing all shapes
+IMAGE_PATTERN_LAYERS = ["annulus-layer", "bmp_Image"]
 
-def _remove_all_layers(viewer: napari.Viewer, layer_type = napari.layers.shapes.shapes.Shapes, _ignore: list[str] = []):
+def _remove_all_layers(viewer: napari.Viewer, layer_type = napari.layers.shapes.shapes.Shapes, _ignore: List[str] = []):
 
     # remove all shapes layers
     layers_to_remove = []
@@ -407,7 +516,7 @@ def _remove_all_layers(viewer: napari.Viewer, layer_type = napari.layers.shapes.
 
         if layer.name in layers_to_ignore:
             continue
-        if isinstance(layer, layer_type) or layer.name in ["bmp_Image","annulus_Image"]:
+        if isinstance(layer, layer_type) or any([layer_name in layer.name for layer_name in IMAGE_PATTERN_LAYERS]):
             layers_to_remove.append(layer)
     for layer in layers_to_remove:
         viewer.layers.remove(layer)  # Not removing the second layer?
@@ -417,7 +526,7 @@ def _draw_patterns_in_napari(
     viewer: napari.Viewer,
     ib_image: FibsemImage,
     eb_image: FibsemImage,
-    milling_stages: list[FibsemMillingStage],
+    milling_stages: List[FibsemMillingStage],
     draw_crosshair: bool = True,
 ):
 
@@ -434,10 +543,16 @@ def _draw_patterns_in_napari(
         shape_types = []
         t0 = time.time()
 
-        patterns = stage.pattern.patterns
-        point = stage.pattern.point
-        name = stage.name
-        is_line_pattern = False
+        patterns: List[FibsemPatternSettings] = stage.pattern.patterns
+        point: Point = stage.pattern.point
+        name: str = stage.name
+        is_line_pattern: bool = False
+
+        # amnulus shapes
+        is_annulus: bool = False
+        annulus_layer = f"{name}-annulus-layer"
+
+        drawn_patterns = []
 
         for pattern_settings in patterns:
             if isinstance(pattern_settings, FibsemBitmapSettings):
@@ -454,12 +569,9 @@ def _draw_patterns_in_napari(
 
             elif isinstance(pattern_settings, FibsemCircleSettings):
                 if pattern_settings.thickness != 0:
-                    annulus_image, translate_position = convert_pattern_to_napari_image(pattern_settings=pattern_settings, image=ib_image)
-                    if "annulus_Image" in viewer.layers:
-                        viewer.layers.remove(viewer.layers["annulus_Image"])
-                    viewer.add_image(annulus_image,translate=translate_position,name="annulus_Image",blending="additive",colormap=COLOURS[i % len(COLOURS)],opacity=0.4)
-                    shape_patterns = []
-                    _ignore.append("annulus_Image")
+                    # annulus is special case becaue napari can't draw annulus as shape, so we draw them as an image
+                    is_annulus = True
+                    drawn_patterns.append(draw_pattern_shape(pattern_settings, ib_image))
                     continue
                 else:
                     shape = convert_pattern_to_napari_circle(pattern_settings=pattern_settings, image=ib_image)
@@ -471,7 +583,7 @@ def _draw_patterns_in_napari(
                 shape_types.append("line")
                 _ignore.append(name)
                 is_line_pattern = True
-            
+
             else:
                 shape = convert_pattern_to_napari_rect(
                     pattern_settings=pattern_settings, image=ib_image
@@ -484,11 +596,11 @@ def _draw_patterns_in_napari(
                 for c in shape:
                     c[1] += eb_image.data.shape[1]
             shape_patterns.append(shape)
-        
+
         t1 = time.time()
 
         if len(shape_patterns) > 0:
-            
+
             if draw_crosshair:
                 crosshair_shapes = create_crosshair_shape(centre_point=point, image=ib_image, eb_image=eb_image)
                 crosshair_shape_types = ["rectangle","rectangle"]
@@ -517,13 +629,37 @@ def _draw_patterns_in_napari(
             if is_line_pattern:
                 viewer.layers[name].edge_width = 3
 
+        if is_annulus:
+            # draw all the annulus for the stage on the same image
+            if annulus_layer in viewer.layers:
+                viewer.layers.remove(viewer.layers[annulus_layer])
+
+            annulus_image = compose_pattern_image(ib_image.data, drawn_patterns)
+
+            translation = (0, eb_image.data.shape[1])
+            label_layer = viewer.add_labels(data=annulus_image,
+                                translate=translation,
+                                name=annulus_layer,
+                                blending="additive",
+                                opacity=0.6)
+
+            cmap = {0: "black", 1: COLOURS[i % len(COLOURS)]}
+            if hasattr(label_layer, "colormap"): # attribute changed in napari 0.5.0+
+                label_layer.colormap = cmap
+            else:
+                label_layer.color = cmap
+            _ignore.append(annulus_layer)
+
         t2 = time.time()
-        # remove all un-updated layers (assume they have been deleted)        
-        _remove_all_layers(viewer=viewer, layer_type=napari.layers.shapes.shapes.Shapes, _ignore=_ignore)#[stage.name for stage in milling_stages])
+        # remove all un-updated layers (assume they have been deleted)
+        _remove_all_layers(viewer=viewer, layer_type=napari.layers.shapes.shapes.Shapes, _ignore=_ignore)
+        # TODO: annulus layers are not removed correctly
         t3 = time.time()
         logging.debug(f"_DRAW_SHAPES: CONVERT: {t1-t0}, ADD/UPDATE: {t2-t1}, REMOVE: {t3-t2}")
     t_2 = time.time()
     logging.debug(f"_DRAW_SHAPES: total time: {t_2-t_1}")
+
+    return _ignore # list of milling pattern layers
 
 def message_box_ui(title: str, text: str, buttons=QMessageBox.Yes | QMessageBox.No):
     msg = QMessageBox()
@@ -572,11 +708,11 @@ def create_combobox_message_box(text: str, title: str, options: list, parent = N
         selected = combobox.currentText()
 
         return selected
-    
+
     return None
 
 
-        
+
 def _draw_crosshair(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, width: float = 0.15) -> None:
 
 
@@ -592,7 +728,7 @@ def _draw_crosshair(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, 
         crosshairs = []
 
         for i,point in enumerate(centre_points):
-            
+
             eb_location_r,eb_location_c = point[0], point[1]
             crosshair_length = width*point[0]
             horizontal_line = [ [eb_location_r, eb_location_c - crosshair_length],[eb_location_r,eb_location_c + crosshair_length] ]
@@ -609,11 +745,11 @@ def _draw_crosshair(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, 
             viewer.layers[f"crosshair"].opacity = 0.8
 
     else:
-        
+
         if f"crosshair" in layers_in_napari :
             viewer.layers["crosshair"].opacity = 0
-           
-    return 
+
+    return
 
 def _scale_length_value(hfw: float) -> float:
 
@@ -642,13 +778,13 @@ def _draw_scalebar(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, w
         location_points = [ [int(eb_image.data.shape[0]*0.9), int(eb_image.data.shape[1]*0.15)],[int(ib_image.data.shape[0]*0.9), int(eb_image.data.shape[1] + ib_image.data.shape[1]*0.15)]]
 
         if is_checked:
-            
+
             # making the scale bar line
             scale_bar_shape = []
 
             for i,point in enumerate(location_points):
-                
-                
+
+
 
                 if i == 0:
                     scale_ratio,eb_scale = _scale_length_value(eb_image.metadata.image_settings.hfw)
@@ -658,7 +794,7 @@ def _draw_scalebar(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, w
                     length = scale_ratio*ib_image.data.shape[1]
 
                 main_line = [[point[0]+25, int(point[1]-0.5*length)], [point[0]+25, int(point[1]+0.5*length)]]
-        
+
                 left_line = [[point[0]+50, int(point[1]-0.5*length)], [point[0], int(point[1]-0.5*length)]]
                 right_line = [[point[0]+50, int(point[1]+0.5*length)], [point[0], int(point[1]+0.5*length)]]
 
@@ -667,7 +803,7 @@ def _draw_scalebar(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, w
                 scale_bar_shape.append(right_line)
 
             if "scalebar" not in layers_in_napari:
-                
+
                 viewer.add_shapes(
                     data=scale_bar_shape,
                     shape_type='line',
@@ -682,7 +818,7 @@ def _draw_scalebar(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, w
 
             ## making the scale bar value
 
-            
+
 
             text = {
                 "string": [f"{eb_scale} um",f"{ib_scale} um"],
@@ -712,7 +848,7 @@ def _draw_scalebar(viewer: napari.Viewer, eb_image, ib_image,is_checked=False, w
             viewer.layers["scalebar_value"].opacity = 0
 
 
-    
+
 
 
 def convert_point_to_napari(resolution: list, pixel_size: float, centre: Point):
@@ -725,7 +861,7 @@ def convert_point_to_napari(resolution: list, pixel_size: float, centre: Point):
 
 
 def validate_pattern_placement(
-    patterns: list[FibsemPattern], resolution: list, shape: list[list[float]]
+    patterns: List[FibsemPatternSettings], resolution: list, shape: List[List[float]]
 ):
     x_lim = resolution[0]
     y_lim = resolution[1]
@@ -788,7 +924,7 @@ def _get_text_ui(
     title: str = "Text Entry",
     default: str = "UserText",
     parent=None,
-) -> tuple[str, bool]:
+) -> Tuple[str, bool]:
     text, okPressed = QtWidgets.QInputDialog.getText(
         parent,
         title,
@@ -799,7 +935,7 @@ def _get_text_ui(
 
     return text, okPressed
 
-def _draw_milling_stages_on_image(image: FibsemImage, milling_stages: list[FibsemMillingStage], show: bool = True):
+def _draw_milling_stages_on_image(image: FibsemImage, milling_stages: List[FibsemMillingStage], show: bool = True):
 
     viewer = napari.Viewer()
     viewer.add_image(image.data, name='test_image')
@@ -810,51 +946,20 @@ def _draw_milling_stages_on_image(image: FibsemImage, milling_stages: list[Fibse
     viewer.close()
 
     for i,stage in enumerate(milling_stages):
-    
+
         plt.plot(0,0,'-',color=COLOURS[i % len(COLOURS)],label=stage.name)
 
     ax.axis('off')
     ax.legend()
     if show:
         plt.show()
-    
+
     return fig
 
-def _calculate_fiducial_area_v2(image: FibsemImage, fiducial_centre: Point, fiducial_length:float)->tuple[FibsemRectangle, bool]:
-    pixelsize = image.metadata.pixel_size.x
-    
-    fiducial_centre.y = -fiducial_centre.y
-    fiducial_centre_px = conversions.convert_point_from_metres_to_pixel(
-        fiducial_centre, pixelsize
-    )
 
-    rcx = fiducial_centre_px.x / image.metadata.image_settings.resolution[0] + 0.5
-    rcy = fiducial_centre_px.y / image.metadata.image_settings.resolution[1] + 0.5
-
-    fiducial_length_px = (
-        conversions.convert_metres_to_pixels(fiducial_length, pixelsize) * 2 # SCALE_FACTOR
-    )
-    h_offset = fiducial_length_px / image.metadata.image_settings.resolution[0] / 2
-    v_offset = fiducial_length_px / image.metadata.image_settings.resolution[1] / 2
-
-    left = rcx - h_offset
-    top = rcy - v_offset
-    width = 2 * h_offset
-    height = 2 * v_offset
-
-    if left < 0 or (left + width) > 1 or top < 0 or (top + height) > 1:
-        flag = True
-    else:
-        flag = False
-
-    fiducial_area = FibsemRectangle(left, top, width, height)
-
-    return fiducial_area, flag
-
-    
 def show_information_dialog(microscope: FibsemMicroscope, parent=None):
     import fibsem
-    
+
     fibsem_version = fibsem.__version__
     autolamella_version = "Not Installed"
     try:
@@ -862,7 +967,7 @@ def show_information_dialog(microscope: FibsemMicroscope, parent=None):
         autolamella_version = autolamella.__version__
     except:
         pass
-    
+
     info = microscope.system.info
 
     text = f"""
