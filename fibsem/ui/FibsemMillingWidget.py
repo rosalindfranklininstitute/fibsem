@@ -7,6 +7,7 @@ from copy import deepcopy
 import napari
 import napari.utils.notifications
 from PyQt5 import QtWidgets, QtCore
+from typing import List
 
 from fibsem import config as cfg
 from fibsem import constants, conversions, milling, patterning, utils
@@ -15,14 +16,13 @@ from fibsem.microscope import (DemoMicroscope, FibsemMicroscope,
 from fibsem.patterning import FibsemMillingStage
 from fibsem.structures import (BeamType, FibsemMillingSettings,
                                MicroscopeSettings,
-                               Point, CrossSectionPattern)
+                               Point, CrossSectionPattern, calculate_fiducial_area_v2)
 from fibsem.ui.FibsemImageSettingsWidget import FibsemImageSettingsWidget
 from fibsem.ui.qtdesigner_files import FibsemMillingWidget
 from fibsem.ui.utils import (_draw_patterns_in_napari, _remove_all_layers, 
                             convert_pattern_to_napari_circle, convert_pattern_to_napari_rect, 
                             validate_pattern_placement,
-                            _get_directory_ui,_get_file_ui, 
-                            _calculate_fiducial_area_v2)
+                            _get_directory_ui,_get_file_ui)
 from napari.qt.threading import thread_worker
 from fibsem.ui import _stylesheets
 
@@ -64,7 +64,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         viewer: napari.Viewer = None,
         image_widget: FibsemImageSettingsWidget = None,
         protocol: dict = None,
-        milling_stages: list[FibsemMillingStage] = [], 
+        milling_stages: List[FibsemMillingStage] = [], 
         parent=None,
     ):
         super(FibsemMillingWidget, self).__init__(parent=parent)
@@ -80,6 +80,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         self.patterns_and_mill_settings = protocol
         
         self.milling_stages = milling_stages
+        self.milling_pattern_layers = []
 
         self.setup_connections()
 
@@ -218,7 +219,10 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         self.doubleSpinBox_centre_y.setKeyboardTracking(False)
         self.doubleSpinBox_centre_x.valueChanged.connect(self.update_ui_pattern)
         self.doubleSpinBox_centre_y.valueChanged.connect(self.update_ui_pattern)
+        self.checkBox_show_milling_crosshair.setChecked(True)
         self.checkBox_show_milling_crosshair.stateChanged.connect(self.update_ui_pattern)
+        self.checkBox_show_milling_patterns.setChecked(True)
+        self.checkBox_show_milling_patterns.stateChanged.connect(self.toggle_pattern_visibility)
         self.checkBox_live_update.setChecked(True)
         self.checkBox_live_update.stateChanged.connect(self.toggle_live_update)
         self.toggle_live_update()
@@ -271,7 +275,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
 
         _remove_all_layers(self.viewer) # remove all shape layers
 
-    def set_milling_stages(self, milling_stages: list[FibsemMillingStage]) -> None:
+    def set_milling_stages(self, milling_stages: List[FibsemMillingStage]) -> None:
         logging.debug(f"Setting milling stages: {len(milling_stages)}")
         self.milling_stages = milling_stages
         
@@ -635,7 +639,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
     def valid_pattern_location(self, stage_pattern: FibsemMillingStage) -> bool:
 
         if stage_pattern.name == "Fiducial":
-            _,flag = _calculate_fiducial_area_v2(image=self.image_widget.ib_image, fiducial_centre = deepcopy(stage_pattern.point), fiducial_length = stage_pattern.patterns[0].height)
+            _,flag = calculate_fiducial_area_v2(image=self.image_widget.ib_image, fiducial_centre = deepcopy(stage_pattern.point), fiducial_length = stage_pattern.patterns[0].height)
             
             if flag:
                 napari.utils.notifications.show_warning(f"Fiducial reduce area is not within the image.")
@@ -689,7 +693,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
 
         return milling_settings
 
-    def update_ui(self, milling_stages: list[FibsemMillingStage] = None):
+    def update_ui(self, milling_stages: List[FibsemMillingStage] = None):
         self.doubleSpinBox_hfw.setValue(self.image_widget.doubleSpinBox_image_hfw.value())
 
         if milling_stages is None and len(self.milling_stages) < 1:
@@ -727,7 +731,7 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
             if not isinstance(self.image_widget.eb_image, FibsemImage):
                 raise Exception(f"No Electron Image, cannot draw patterns. Please take an image.") # TODO: this is unintuitive why this is required -> ui issue only
             # clear patterns then draw new ones
-            _draw_patterns_in_napari(self.viewer, 
+            self.milling_pattern_layers = _draw_patterns_in_napari(self.viewer, 
                 ib_image=self.image_widget.ib_image, 
                 eb_image=self.image_widget.eb_image, 
                 milling_stages = milling_stages,
@@ -740,6 +744,13 @@ class FibsemMillingWidget(FibsemMillingWidget.Ui_Form, QtWidgets.QWidget):
         t2 = time.time()
         logging.debug(f"UPDATE_UI: GET: {t1-t0}, DRAW: {t2-t1}")
         self.viewer.layers.selection.active = self.image_widget.eb_layer
+
+    def toggle_pattern_visibility(self):
+
+        is_visible = self.checkBox_show_milling_patterns.isChecked()
+        for layer in self.milling_pattern_layers:
+            if layer in self.viewer.layers:
+                self.viewer.layers[layer].visible = is_visible
 
     def _toggle_interactions(self, enabled: bool = True, caller: str = None, milling: bool = False):
 

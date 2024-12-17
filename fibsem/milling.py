@@ -1,20 +1,20 @@
 import logging
+from typing import List
+
+from fibsem.microscope import FibsemMicroscope
+from fibsem.patterning import FibsemMillingStage
 from fibsem.structures import (
     BeamType,
+    FibsemBitmapSettings,
+    FibsemCircleSettings,
     FibsemImage,
-    FibsemRectangle,
+    FibsemLineSettings,
     FibsemMillingSettings,
-    Point,
+    FibsemPatternSettings,
+    FibsemRectangle,
+    FibsemRectangleSettings,
     ImageSettings,
-    MicroscopeSettings
 )
-from fibsem.structures import (FibsemPatternSettings, FibsemRectangleSettings, 
-                               FibsemCircleSettings, FibsemLineSettings, 
-                               FibsemBitmapSettings)
-from fibsem.patterning import FibsemMillingStage
-from typing import Union
-from fibsem.microscope import FibsemMicroscope
-
 
 ########################### SETUP
 
@@ -33,10 +33,10 @@ def setup_milling(
     microscope.setup_milling(mill_settings = mill_settings)
 
 def run_milling_drift_corrected(
-    microscope: FibsemMicroscope, 
-    milling_current: float,  
-    image_settings: ImageSettings, 
-    ref_image: FibsemImage, 
+    microscope: FibsemMicroscope,
+    milling_current: float,
+    image_settings: ImageSettings,
+    ref_image: FibsemImage,
     reduced_area: FibsemRectangle = None,
 ) -> None:
     """Run Ion Beam Milling.
@@ -73,7 +73,7 @@ def estimate_milling_time(microscope: FibsemMicroscope, microscope_patterns) -> 
     """
 
     total_time = microscope.estimate_milling_time(microscope_patterns)
-        
+
     return total_time
 
 def finish_milling(
@@ -91,7 +91,7 @@ def finish_milling(
     microscope.finish_milling(imaging_current=imaging_current, imaging_voltage=imaging_voltage)
     logging.info("Finished Ion Beam Milling.")
 
-def draw_patterns(microscope: FibsemMicroscope, patterns: list[FibsemPattern]) -> None:
+def draw_patterns(microscope: FibsemMicroscope, patterns: List[FibsemPatternSettings]) -> None:
     """Draw a milling pattern from settings
     Args:
         microscope (FibsemMicroscope): Fibsem microscope instance
@@ -101,7 +101,7 @@ def draw_patterns(microscope: FibsemMicroscope, patterns: list[FibsemPattern]) -
         microscope_patterns.append(draw_pattern(microscope, pattern))
     return microscope_patterns
 
-        
+
 def draw_pattern(microscope: FibsemMicroscope, pattern: FibsemPattern):
     """Draw a milling pattern from settings
 
@@ -124,13 +124,14 @@ def draw_pattern(microscope: FibsemMicroscope, pattern: FibsemPattern):
 
     elif isinstance(pattern, FibsemBitmapSettings):
         microscope_pattern = microscope.draw_bitmap_pattern(pattern, pattern.path)
-        
+
     return microscope_pattern
 
 
 def convert_to_bitmap_format(path):
+    import os
+
     from PIL import Image
-    import os 
     img=Image.open(path)
     a=img.convert("RGB", palette=Image.ADAPTIVE, colors=8)
     new_path = os.path.join(os.path.dirname(path), "24bit_img.tif")
@@ -138,12 +139,14 @@ def convert_to_bitmap_format(path):
     return new_path
 
 
-def mill_stages(microscope: FibsemMicroscope, stages: list[FibsemMillingStage], asynch: bool=False):
+def mill_stages(microscope: FibsemMicroscope, stages: List[FibsemMillingStage], asynch: bool=False):
     for stage in stages:
         mill_stage(microscope=microscope, stage=stage, asynch=asynch)
 
     # finish milling (restore imaging conditions)
-    finish_milling(microscope)
+    finish_milling(microscope,
+                   imaging_current=microscope.system.ion.beam.beam_current,
+                   imaging_voltage=microscope.system.ion.beam.voltage)
 
 def mill_stage(microscope: FibsemMicroscope, stage: FibsemMillingStage, asynch: bool=False):
 
@@ -154,26 +157,26 @@ def mill_stage(microscope: FibsemMicroscope, stage: FibsemMillingStage, asynch: 
     for pattern in stage.pattern.patterns:
         draw_pattern(microscope, pattern)
 
-    run_milling(microscope=microscope, 
-        milling_current=stage.milling.milling_current, 
-        milling_voltage=stage.milling.milling_voltage, 
+    run_milling(microscope=microscope,
+        milling_current=stage.milling.milling_current,
+        milling_voltage=stage.milling.milling_voltage,
         asynch=asynch)
 
 
 
-def mill_stages_ui(microscope: FibsemMicroscope, stages: list[FibsemMillingStage], asynch: bool=False, parent_ui = None):
+def mill_stages_ui(microscope: FibsemMicroscope, stages: List[FibsemMillingStage], asynch: bool=False, parent_ui = None):
     """Run a list of milling stages, with a progress bar and notifications."""
     import napari.utils.notifications
 
     if isinstance(stages, FibsemMillingStage):
         stages = [stages]
 
-  
+
     for idx, stage in enumerate(stages):
-    
+
         if parent_ui:
             parent_ui.milling_notification.emit(f"Preparing: {stage.name}")
-    
+
         try:
             mill_stage_ui(microscope, stage, parent_ui, idx, len(stages))
             # TODO implement a special case for overtilt milling
@@ -184,13 +187,13 @@ def mill_stages_ui(microscope: FibsemMicroscope, stages: list[FibsemMillingStage
             napari.utils.notifications.show_error(f"Error running milling stage: {stage.name}")
             logging.error(e)
         finally:
-            finish_milling(microscope, 
-                                        imaging_current=microscope.system.ion.beam.beam_current, 
+            finish_milling(microscope,
+                                        imaging_current=microscope.system.ion.beam.beam_current,
                                         imaging_voltage=microscope.system.ion.beam.voltage)
         if parent_ui:
             parent_ui._progress_bar_quit.emit()
             parent_ui.milling_notification.emit(f"Milling stage complete: {stage.name}")
-    
+
     if parent_ui:
         parent_ui.milling_notification.emit(f"Milling complete. {len(stages)} stages completed.")
 
@@ -210,19 +213,20 @@ def mill_stage_ui(microscope: FibsemMicroscope, stage: FibsemMillingStage, paren
 
     run_milling(microscope, stage.milling.milling_current, stage.milling.milling_voltage)
 
-    return 
+    return
 
 
 
 def mill_stage_with_overtilt(microscope: FibsemMicroscope, stage: FibsemMillingStage, ref_image: FibsemImage, asynch=False ):
-    """Mill a trench pattern with overtilt, 
+    """Mill a trench pattern with overtilt,
     based on https://www.sciencedirect.com/science/article/abs/pii/S1047847716301514 and autolamella v1"""
     # set up milling
     setup_milling(microscope, stage.milling)
 
-    from fibsem.structures import FibsemStagePosition
-    from fibsem import alignment, patterning
     import numpy as np
+
+    from fibsem import alignment, patterning
+    from fibsem.structures import FibsemStagePosition
 
     overtilt_in_degrees = stage.pattern.protocol.get("overtilt", 1)
 
@@ -231,10 +235,10 @@ def mill_stage_with_overtilt(microscope: FibsemMicroscope, stage: FibsemMillingS
         raise ValueError("Pattern must be TrenchPattern for overtilt milling")
 
     for i, pattern in enumerate(stage.pattern.patterns):
-        
+
         # save initial position
         initial_position = microscope.get_stage_position()
-        
+
         # overtilt
         if i == 0:
             t = -np.deg2rad(overtilt_in_degrees)
@@ -245,10 +249,10 @@ def mill_stage_with_overtilt(microscope: FibsemMicroscope, stage: FibsemMillingS
         # beam alignment
         image_settings = ImageSettings.fromFibsemImage(ref_image)
         image_settings.filename = f"alignment_target_{stage.name}"
-        
-        alignment.multi_step_alignment_v2(microscope=microscope, 
-                                        ref_image=ref_image, 
-                                        beam_type=BeamType.ION, 
+
+        alignment.multi_step_alignment_v2(microscope=microscope,
+                                        ref_image=ref_image,
+                                        beam_type=BeamType.ION,
                                         alignment_current=None,
                                         steps=3)
 
