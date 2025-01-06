@@ -321,7 +321,6 @@ class FibsemMicroscope(ABC):
     def draw_bitmap_pattern(
         self,
         pattern_settings: FibsemBitmapSettings,
-        path: str,
     ):
         pass
 
@@ -1943,11 +1942,9 @@ class ThermoMicroscope(FibsemMicroscope):
 
     def draw_bitmap_pattern(
         self,
-        pattern_settings: FibsemBitmapSettings,
-        path: str,
+        pattern_settings: FibsemBitmapSettings
     ):
-
-        bitmap_pattern = BitmapPatternDefinition.load(path)
+        bitmap_pattern = BitmapPatternDefinition.load(pattern_settings.path)
 
         pattern = self.connection.patterning.create_bitmap(
             center_x=pattern_settings.centre_x,
@@ -1958,7 +1955,7 @@ class ThermoMicroscope(FibsemMicroscope):
             bitmap_pattern_definition=bitmap_pattern,
         )
 
-        logging.debug({"msg": "draw_bitmap_pattern", "pattern_settings": pattern_settings.to_dict(), "path": path})
+        logging.debug({"msg": "draw_bitmap_pattern", "pattern_settings": pattern_settings.to_dict(), "path": bitmap_pattern.path})
 
         return pattern
 
@@ -4551,7 +4548,6 @@ class TescanMicroscope(FibsemMicroscope):
     def draw_bitmap_pattern(
         self,
         pattern_settings: FibsemBitmapSettings,
-        path: str,
     ):
         return NotImplemented
 
@@ -5830,11 +5826,10 @@ class DemoMicroscope(FibsemMicroscope):
     def draw_annulus(self, pattern_settings: FibsemCircleSettings) -> None:
         logging.debug({"msg": "draw_annulus", "pattern_settings": pattern_settings.to_dict()})
 
-
-    def draw_bitmap_pattern(self, pattern_settings: FibsemBitmapSettings,
-        path: str):
-        logging.debug({"msg": "draw_bitmap_pattern", "pattern_settings": pattern_settings.to_dict(), "path": path})
+    def draw_bitmap_pattern(self, pattern_settings: FibsemBitmapSettings):
+        logging.debug({"msg": "draw_bitmap_pattern", "pattern_settings": pattern_settings.to_dict()})
         return
+
     def run_milling_drift_corrected(self):
         _check_beam(BeamType.ION, self.system)
         return
