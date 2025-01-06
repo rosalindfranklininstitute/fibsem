@@ -1204,7 +1204,7 @@ PROTOCOL_MILL_MAP = {
     "MillPolishingCut": TrenchPattern,
     "mill_rough": TrenchPattern,
     "mill_polishing": TrenchPattern,
-
+    "bitmap": BitmapPattern,
 }
 
 
