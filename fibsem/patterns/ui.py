@@ -2,8 +2,10 @@ import logging
 import math
 from typing import List, Tuple
 
+import PIL
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+from matplotlib.collections import PatchCollection
 import numpy as np
 
 from fibsem.patterning import (
@@ -13,15 +15,16 @@ from fibsem.patterning import (
     RectanglePattern,
     TrenchPattern,
     WaffleNotchPattern,
+    BitmapPattern,
 )
 from fibsem.structures import (
     FibsemImage,
     FibsemImageMetadata,
-    FibsemRectangleSettings,
+    FibsemBitmapSettings,
     ImageSettings,
     Point,
+    FibsemRectangleSettings,
 )
-from typing import Tuple
 
 COLOURS = [
     "yellow",
@@ -115,7 +118,7 @@ def _draw_rectangle_pattern(
     pattern: RectanglePattern,
     colour: str = "yellow",
     name: str = "Rectangle",
-) -> List[mpatches.Rectangle]:
+) -> List[PatchCollection]:
     """Draw a rectangle pattern on an image.
     Args:
         image: FibsemImage: Image to draw pattern on.
@@ -136,20 +139,98 @@ def _draw_rectangle_pattern(
             p, pixel_size, image_shape
         )
 
-        rect = mpatches.Rectangle(
-            (px - width / 2, py - height / 2),  # bottom left corner
-            width=width,
-            height=height,
-            angle=math.degrees(p.rotation),
-            rotation_point=PROPERTIES["rotation_point"],
-            linewidth=PROPERTIES["line_width"],
-            edgecolor=colour,
-            facecolor=colour,
-            alpha=PROPERTIES["opacity"],
+        patch_collection = PatchCollection(
+            [
+                mpatches.Rectangle(
+                    (px - width / 2, py - height / 2),  # bottom left corner
+                    width=width,
+                    height=height,
+                    angle=math.degrees(p.rotation),
+                    rotation_point=PROPERTIES["rotation_point"],
+                    linewidth=PROPERTIES["line_width"],
+                    edgecolor=colour,
+                    facecolor=colour,
+                    alpha=PROPERTIES["opacity"],
+                )
+            ],
+            match_original=True,
         )
         if i == 1:
-            rect.set_label(f"{name}")
-        patches.append(rect)
+            patch_collection.set_label(f"{name}")
+        patches.append(patch_collection)
+
+    return patches
+
+
+def _draw_bitmap_pattern(
+    image: FibsemImage,
+    pattern: FibsemBitmapSettings,
+    colour: str = "yellow",
+    name: str = "Bitmap",
+) -> List[PatchCollection]:
+    """Draw a rectangle pattern on an image.
+    Args:
+        image: FibsemImage: Image to draw pattern on.
+        pattern: RectanglePattern: Rectangle pattern to draw.
+        colour: str: Colour of rectangle patches.
+        name: str: Name of the rectangle patches.
+    Returns:
+        List[mpatches.Rectangle]: List of patches to draw.
+    """
+    # common image properties
+    pixel_size = image.metadata.pixel_size.x  # assume isotropic
+    image_shape = image.data.shape
+
+    patches = []
+    for i, p in enumerate(pattern.patterns, 1):
+        # convert from microscope image (real-space) to image pixel-space
+        px, py, width, height = _rect_pattern_to_image_pixels(
+            p, pixel_size, image_shape
+        )
+        array = np.asarray(PIL.Image.open(p.path, formats=("BMP",)))
+        bitmap_rects = []
+        for j in range(array.size):
+            # Draw a thin rectangle for each bitmap pixel (assumed to be 1D)
+            bitmap_rects.append(
+                mpatches.Rectangle(
+                    (
+                        px - width * (1 - i / array.size),
+                        py - height / 2,
+                    ),  # bottom left corner
+                    width=width / array.size,
+                    height=height,
+                    angle=math.degrees(p.rotation),
+                    rotation_point=PROPERTIES["rotation_point"],
+                    linewidth=0,
+                    edgecolor=None,
+                    facecolor=colour,
+                    alpha=PROPERTIES["opacity"] * array[j] / 255,
+                )
+            )
+        # Draw the edges
+        bitmap_rects.append(
+            mpatches.Rectangle(
+                (
+                    px - width,
+                    py - height / 2,
+                ),  # bottom left corner
+                width=width,
+                height=height,
+                angle=math.degrees(p.rotation),
+                rotation_point=PROPERTIES["rotation_point"],
+                linewidth=PROPERTIES["line_width"],
+                edgecolor=colour,
+                facecolor=None,
+                alpha=PROPERTIES["opacity"],
+            )
+        )
+
+        # Store all the rectangles as a patch collection
+        patch_collection = PatchCollection(bitmap_rects, match_original=True)
+
+        if i == 1:
+            patch_collection.set_label(f"{name}")
+        patches.append(patch_collection)
 
     return patches
 
@@ -160,6 +241,7 @@ drawing_functions = {
     MicroExpansionPattern: _draw_rectangle_pattern,
     FiducialPattern: _draw_rectangle_pattern,
     WaffleNotchPattern: _draw_rectangle_pattern,
+    BitmapPattern: _draw_bitmap_pattern,
 }
 
 
@@ -182,17 +264,17 @@ def draw_milling_patterns(
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     ax.imshow(image.data, cmap="gray")
 
-    patches = []
+    patch_collections = []
     for i, stage in enumerate(milling_stages):
         colour = COLOURS[i % len(COLOURS)]
         p = stage.pattern
 
-        patches.extend(
+        patch_collections.extend(
             drawing_functions[type(p)](image, p, colour=colour, name=stage.name)
         )
 
-    for patch in patches:
-        ax.add_patch(patch)
+    for pc in patch_collections:
+        ax.add_collection(pc)
     ax.legend()
 
     # draw crosshair at centre of image
@@ -205,6 +287,7 @@ def draw_milling_patterns(
         try:
             # optional dependency, best effort
             from matplotlib_scalebar.scalebar import ScaleBar
+
             scalebar = ScaleBar(
                 dx=image.metadata.pixel_size.x,
                 color="black",
