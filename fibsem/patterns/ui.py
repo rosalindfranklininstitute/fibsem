@@ -208,7 +208,7 @@ def _draw_bitmap_pattern(
                     linewidth=0,
                     edgecolor="none",
                     facecolor=colour,
-                    alpha=interp_array[j] / 255,
+                    alpha=PROPERTIES["opacity"] * interp_array[j] / 255,
                 )
             )
         # Draw the edges
