@@ -187,31 +187,35 @@ def _draw_bitmap_pattern(
         px, py, width, height = _rect_pattern_to_image_pixels(
             p, pixel_size, image_shape
         )
-        array = np.asarray(PIL.Image.open(p.path, formats=("BMP",)))
+        pixel_positions = tuple(range(int(round(width))))
+
+        array = np.asarray(PIL.Image.open(p.path, formats=("BMP",))).flatten()
+        interp_array = np.interp(pixel_positions, range(array.size), array)
+
         bitmap_rects = []
-        for j in range(array.size):
+        for j in pixel_positions:
             # Draw a thin rectangle for each bitmap pixel (assumed to be 1D)
             bitmap_rects.append(
                 mpatches.Rectangle(
                     (
-                        px - width * (1 - i / array.size),
+                        px - (width / 2) + j,
                         py - height / 2,
                     ),  # bottom left corner
-                    width=width / array.size,
+                    width=1,
                     height=height,
                     angle=math.degrees(p.rotation),
                     rotation_point=PROPERTIES["rotation_point"],
                     linewidth=0,
-                    edgecolor=None,
+                    edgecolor="none",
                     facecolor=colour,
-                    alpha=PROPERTIES["opacity"] * array[j] / 255,
+                    alpha=interp_array[j] / 255,
                 )
             )
         # Draw the edges
         bitmap_rects.append(
             mpatches.Rectangle(
                 (
-                    px - width,
+                    px - width / 2,
                     py - height / 2,
                 ),  # bottom left corner
                 width=width,
@@ -220,7 +224,7 @@ def _draw_bitmap_pattern(
                 rotation_point=PROPERTIES["rotation_point"],
                 linewidth=PROPERTIES["line_width"],
                 edgecolor=colour,
-                facecolor=None,
+                facecolor="none",
                 alpha=PROPERTIES["opacity"],
             )
         )
