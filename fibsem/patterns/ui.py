@@ -16,6 +16,7 @@ from fibsem.patterning import (
     TrenchPattern,
     WaffleNotchPattern,
     BitmapPattern,
+    TrenchBitmapPattern,
 )
 from fibsem.structures import (
     FibsemImage,
@@ -246,6 +247,7 @@ drawing_functions = {
     FiducialPattern: _draw_rectangle_pattern,
     WaffleNotchPattern: _draw_rectangle_pattern,
     BitmapPattern: _draw_bitmap_pattern,
+    TrenchBitmapPattern: _draw_bitmap_pattern,
 }
 
 

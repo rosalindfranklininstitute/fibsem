@@ -346,6 +346,68 @@ class TrenchPattern(BasePattern):
 
 
 @dataclass
+class TrenchBitmapPattern(BasePattern):
+    name: str = "TrenchBitmapPattern"
+    required_keys: tuple[str] = REQUIRED_KEYS["Trench"]
+    patterns = None
+    protocol = None
+    point = None
+
+    def define(
+        self, protocol: dict, point: Point = Point()
+    ) -> list[FibsemRectangleSettings]:
+        check_keys(protocol, self.required_keys)
+
+        lamella_width = protocol["lamella_width"]
+        lamella_height = protocol["lamella_height"]
+        trench_height = protocol["trench_height"]
+        size_ratio = protocol.get("size_ratio", 1.0)
+        upper_trench_height = trench_height / max(size_ratio, 1.0)
+        lower_trench_height = trench_height * min(size_ratio, 1.0)
+        offset = protocol.get("offset", 0)
+        depth = protocol["depth"]
+        use_cleaning_cross_section = protocol.get("cleaning_cross_section", False)
+        cross_section = CrossSectionPattern[protocol.get("cross_section", "Rectangle")]
+
+        centre_upper_y = point.y + (
+            lamella_height / 2 + upper_trench_height / 2 + offset
+        )
+        centre_lower_y = point.y - (
+            lamella_height / 2 + lower_trench_height / 2 + offset
+        )
+
+        # mill settings
+        lower_pattern_settings = FibsemBitmapSettings(
+            width=lamella_width,
+            height=lower_trench_height,
+            depth=depth,
+            centre_x=point.x,
+            centre_y=centre_lower_y,
+            cleaning_cross_section=use_cleaning_cross_section,
+            scan_direction="BottomToTop",
+            cross_section=cross_section,
+            path=protocol["path"],
+        )
+
+        upper_pattern_settings = FibsemBitmapSettings(
+            width=lamella_width,
+            height=upper_trench_height,
+            depth=depth,
+            centre_x=point.x,
+            centre_y=centre_upper_y,
+            cleaning_cross_section=use_cleaning_cross_section,
+            scan_direction="TopToBottom",
+            cross_section=cross_section,
+            path=protocol["path"],
+        )
+
+        self.patterns = [lower_pattern_settings, upper_pattern_settings]
+        self.protocol = protocol
+        self.point = point
+        return self.patterns
+
+
+@dataclass
 class HorseshoePattern(BasePattern):
     name: str = "Horseshoe"
     required_keys: Tuple[str] = REQUIRED_KEYS["Horseshoe"]
