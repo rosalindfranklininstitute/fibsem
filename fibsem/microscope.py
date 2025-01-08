@@ -6466,4 +6466,3 @@ class Demo2Microscope(DemoMicroscope):
         logging.debug({"msg": "acquire_image", "metadata": fibsem_image.metadata.to_dict()})
 
         return fibsem_image
-
