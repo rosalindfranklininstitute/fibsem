@@ -108,6 +108,15 @@ REQUIRED_KEYS = {
     "Clover": ("radius", "depth"),
     "TriForce": ("height", "width", "depth"),
     "Trapezoid": ("inner_width", "outer_width", "trench_height", "depth", "distance", "n_rectangles", "overlap"),
+    "Bitmap": (
+        "width",
+        "height",
+        "depth",
+        "rotation",
+        "scan_direction",
+        "cleaning_cross_section",
+        "path",
+    ),
 }
 
 
@@ -151,7 +160,7 @@ class BasePattern(ABC):
 @dataclass
 class BitmapPattern(BasePattern):
     name: str = "BitmapPattern"
-    required_keys: Tuple[str] = ("width", "height", "depth", "rotation","path")
+    required_keys: Tuple[str] = REQUIRED_KEYS["Bitmap"]
     patterns = None
     protocol = None
 
@@ -1076,6 +1085,7 @@ __PATTERNS__ = [
     BitmapPattern,
     AnnulusPattern,
     TrapezoidPattern,
+    TrenchBitmapPattern,
 ]
 
 
@@ -1204,7 +1214,7 @@ PROTOCOL_MILL_MAP = {
     "MillPolishingCut": TrenchPattern,
     "mill_rough": TrenchPattern,
     "mill_polishing": TrenchPattern,
-    "bitmap": BitmapPattern,
+    "bitmap_lamella": TrenchBitmapPattern,
 }
 
 

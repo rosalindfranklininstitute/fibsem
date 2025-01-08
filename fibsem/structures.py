@@ -1028,9 +1028,12 @@ class FibsemBitmapSettings(FibsemPatternSettings):
     width: float
     height: float
     depth: float
-    rotation: float
     centre_x: float
     centre_y: float
+    rotation: float = 0
+    cleaning_cross_section: bool = False
+    scan_direction: str = "TopToBottom"
+    cross_section: CrossSectionPattern = CrossSectionPattern.Rectangle
     path: str = None
 
     def to_dict(self) -> dict:
@@ -1041,6 +1044,9 @@ class FibsemBitmapSettings(FibsemPatternSettings):
             "rotation": self.rotation,
             "centre_x": self.centre_x,
             "centre_y": self.centre_y,
+            "cleaning_cross_section": self.cleaning_cross_section,
+            "scan_direction": self.scan_direction,
+            "cross_section": self.cross_section.name,
             "path": self.path,
         }
 
@@ -1050,9 +1056,12 @@ class FibsemBitmapSettings(FibsemPatternSettings):
             width=data["width"],
             height=data["height"],
             depth=data["depth"],
-            rotation=data["rotation"],
             centre_x=data["centre_x"],
             centre_y=data["centre_y"],
+            rotation=data.get("rotation", 0),
+            scan_direction=data.get("scan_direction", "TopToBottom"),
+            cross_section=CrossSectionPattern[data.get("cross_section", "Rectangle")],
+            cleaning_cross_section=data.get("cleaning_cross_section", False),
             path=data["path"],
         )
 
