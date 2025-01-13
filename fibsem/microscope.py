@@ -6393,6 +6393,9 @@ class Demo2Microscope(DemoMicroscope):
             logging.warning("new_image_fn is None. Probably run out of images in folder.")
             return None
 
+        if new_image_fn is not None:
+            image_settings.filename = new_image_fn.name
+            image_settings.path = str(new_image_fn.parent)
         ad_img = AdornedImage.load(new_image_fn)
 
         # Problem, FibsemImage function fromAdornedImage() only works if THERMO
