@@ -188,13 +188,14 @@ def _draw_bitmap_pattern(
         px, py, width, height = _rect_pattern_to_image_pixels(
             p, pixel_size, image_shape
         )
-        pixel_positions = tuple(range(int(round(width))))
 
         array = np.asarray(PIL.Image.open(p.path, formats=("BMP",))).flatten()
-        interp_array = np.interp(pixel_positions, range(array.size), array)
+
+        if width < array.size:  # Cannot have sub-pixel patches
+            array = np.interp(tuple(range(int(round(width)))), range(array.size), array)
 
         bitmap_rects = []
-        for j in pixel_positions:
+        for j in range(array.size):
             # Draw a thin rectangle for each bitmap pixel (assumed to be 1D)
             bitmap_rects.append(
                 mpatches.Rectangle(
@@ -209,7 +210,7 @@ def _draw_bitmap_pattern(
                     linewidth=0,
                     edgecolor="none",
                     facecolor=colour,
-                    alpha=PROPERTIES["opacity"] * interp_array[j] / 255,
+                    alpha=PROPERTIES["opacity"] * array[j] / 255,
                 )
             )
         # Draw the edges
