@@ -6370,6 +6370,8 @@ class Demo2Microscope(DemoMicroscope):
         # else:
         #     self._ib_image = image
 
+        image_settings = ImageSettings.from_dict(image_settings.to_dict())
+
         _check_beam(image_settings.beam_type, self.system)
         vfw = image_settings.hfw * image_settings.resolution[1] / image_settings.resolution[0]
         pixelsize = Point(image_settings.hfw / image_settings.resolution[0],
