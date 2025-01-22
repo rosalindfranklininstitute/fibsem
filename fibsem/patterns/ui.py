@@ -6,6 +6,7 @@ import PIL
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
+from skimage.transform import resize
 import numpy as np
 
 from fibsem.patterning import (
@@ -190,35 +191,56 @@ def _draw_bitmap_pattern(
         )
 
         array = np.asarray(PIL.Image.open(p.path, formats=("BMP",)))
-        dwell_time_array = array[:, :, 2].flatten()
-        dwell_time_array[array[:, :, 1] == 1] = 0  # Set blanked areas to 0
+        dwell_time_array = array[:, :, 2].copy()
+        dwell_time_array[array[:, :, 1] == 1] == 0  # Set blanked areas to 0
+        del array
 
-        if width < array.size:  # Cannot have sub-pixel patches
-            dwell_time_array = np.interp(
-                tuple(range(int(round(width)))),
-                range(dwell_time_array.size),
-                dwell_time_array,
+        # Ensure no rectangles will be subpixel (these are not displayed)
+        target_shape = list(dwell_time_array.shape)
+        resize_array = False
+        if height < dwell_time_array.shape[0]:
+            resize_array = True
+            target_shape[0] = round(height)
+        if width < dwell_time_array.shape[1]:
+            resize_array = True
+            target_shape[1] = round(width)
+
+        if resize_array:
+            dwell_time_array = resize(
+                dwell_time_array, output_shape=target_shape, preserve_range=True
             )
+
+        rectangle_height = (
+            1
+            if round(height) == dwell_time_array.shape[0]
+            else height / dwell_time_array.shape[0]
+        )
+        rectangle_width = (
+            1
+            if round(width) == dwell_time_array.shape[1]
+            else width / dwell_time_array.shape[1]
+        )
 
         bitmap_rects = []
         for j in range(dwell_time_array.shape[0]):
-            # Draw a thin rectangle for each bitmap pixel (assumed to be 1D)
-            bitmap_rects.append(
-                mpatches.Rectangle(
-                    (
-                        px - (width / 2) + j,
-                        py - height / 2,
-                    ),  # bottom left corner
-                    width=1,
-                    height=height,
-                    angle=math.degrees(p.rotation),
-                    rotation_point=PROPERTIES["rotation_point"],
-                    linewidth=0,
-                    edgecolor="none",
-                    facecolor=colour,
-                    alpha=PROPERTIES["opacity"] * dwell_time_array[j] / 255,
+            for k in range(dwell_time_array.shape[1]):
+                # Draw a thin rectangle for each bitmap pixel (assumed to be 1D)
+                bitmap_rects.append(
+                    mpatches.Rectangle(
+                        (
+                            px - (width / 2) + k,
+                            py - (height / 2) + j,
+                        ),  # bottom left corner
+                        width=rectangle_width,
+                        height=rectangle_height,
+                        angle=math.degrees(p.rotation),
+                        rotation_point=PROPERTIES["rotation_point"],
+                        linewidth=0,
+                        edgecolor="none",
+                        facecolor=colour,
+                        alpha=PROPERTIES["opacity"] * dwell_time_array[j, k] / 255,
+                    )
                 )
-            )
         # Draw the edges
         bitmap_rects.append(
             mpatches.Rectangle(
