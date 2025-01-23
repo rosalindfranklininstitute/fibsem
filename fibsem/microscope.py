@@ -1944,7 +1944,12 @@ class ThermoMicroscope(FibsemMicroscope):
         self,
         pattern_settings: FibsemBitmapSettings
     ):
-        bitmap_pattern = BitmapPatternDefinition.load(pattern_settings.path)
+        
+        if isinstance(pattern_settings.bitmap, np.ndarray):
+            bitmap_pattern = BitmapPatternDefinition()
+            bitmap_pattern.points = pattern_settings.bitmap
+        else:
+            bitmap_pattern = BitmapPatternDefinition.load(pattern_settings.bitmap)
 
         pattern = self.connection.patterning.create_bitmap(
             center_x=pattern_settings.centre_x,
@@ -1955,7 +1960,7 @@ class ThermoMicroscope(FibsemMicroscope):
             bitmap_pattern_definition=bitmap_pattern,
         )
 
-        logging.debug({"msg": "draw_bitmap_pattern", "pattern_settings": pattern_settings.to_dict(), "path": bitmap_pattern.path})
+        logging.debug({"msg": "draw_bitmap_pattern", "pattern_settings": pattern_settings.to_dict()})
 
         return pattern
 

@@ -115,7 +115,7 @@ REQUIRED_KEYS = {
         "rotation",
         "scan_direction",
         "cleaning_cross_section",
-        "path",
+        "bitmap",
     ),
 }
 
@@ -165,15 +165,17 @@ class BitmapPattern(BasePattern):
     protocol = None
 
     def define(
-            self, protocol: dict, point: Point = Point()
+        self, protocol: dict, point: Point = Point()
     ) -> List[FibsemPatternSettings]:
         protocol["centre_x"] = point.x
         protocol["centre_y"] = point.y
         protocol["pattern"] = "BitmapPattern"
         protocol["rotation"] = protocol.get("rotation", 0)
-        protocol["cleaning_cross_section"] = protocol.get("cleaning_cross_section", False)
+        protocol["cleaning_cross_section"] = protocol.get(
+            "cleaning_cross_section", False
+        )
         protocol["scan_direction"] = protocol.get("scan_direction", "TopToBottom")
-        protocol["path"] = protocol.get("path", 'bmp_path')
+        protocol["bitmap"] = protocol["bitmap"]
         self.patterns = [FibsemBitmapSettings.from_dict(protocol)]
         self.protocol = protocol
         return self.patterns
@@ -386,7 +388,7 @@ class TrenchBitmapPattern(BasePattern):
             cleaning_cross_section=use_cleaning_cross_section,
             scan_direction="BottomToTop",
             cross_section=cross_section,
-            path=protocol["path"],
+            bitmap=protocol["bitmap"],
         )
 
         upper_pattern_settings = FibsemBitmapSettings(
@@ -398,7 +400,7 @@ class TrenchBitmapPattern(BasePattern):
             cleaning_cross_section=use_cleaning_cross_section,
             scan_direction="TopToBottom",
             cross_section=cross_section,
-            path=protocol["path"],
+            bitmap=protocol["bitmap"],
         )
 
         self.patterns = [lower_pattern_settings, upper_pattern_settings]

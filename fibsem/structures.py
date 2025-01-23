@@ -1034,7 +1034,7 @@ class FibsemBitmapSettings(FibsemPatternSettings):
     cleaning_cross_section: bool = False
     scan_direction: str = "TopToBottom"
     cross_section: CrossSectionPattern = CrossSectionPattern.Rectangle
-    path: str = None
+    bitmap: Union[str, os.PathLike[str], np.typing.NDArray[Any]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -1047,7 +1047,7 @@ class FibsemBitmapSettings(FibsemPatternSettings):
             "cleaning_cross_section": self.cleaning_cross_section,
             "scan_direction": self.scan_direction,
             "cross_section": self.cross_section.name,
-            "path": self.path,
+            "bitmap": self.bitmap,
         }
 
     @staticmethod
@@ -1062,7 +1062,7 @@ class FibsemBitmapSettings(FibsemPatternSettings):
             scan_direction=data.get("scan_direction", "TopToBottom"),
             cross_section=CrossSectionPattern[data.get("cross_section", "Rectangle")],
             cleaning_cross_section=data.get("cleaning_cross_section", False),
-            path=data["path"],
+            bitmap=data["bitmap"],
         )
 
 
