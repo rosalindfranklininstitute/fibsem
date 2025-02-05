@@ -11,7 +11,7 @@ import warnings
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from queue import Queue
-from typing import List, Union
+from typing import List, Union, Any
 
 import numpy as np
 
@@ -1939,15 +1939,29 @@ class ThermoMicroscope(FibsemMicroscope):
 
         return pattern
 
-
+    @staticmethod
+    def _bitmap_to_points(
+        bitmap_image: np.typing.NDArray[np.uint8],
+    ) -> np.typing.NDArray[Any]:
+        points_array = np.empty((*bitmap_image.shape[:2], 2), dtype=object)
+        points_array[:, :, 0] = np.interp(bitmap_image[:, :, 2], (0, 255), (0, 1))
+        points_array[:, :, 1] = 1 - bitmap_image[:, :, 1]
+        return points_array
+ 
     def draw_bitmap_pattern(
         self,
         pattern_settings: FibsemBitmapSettings
     ):
-        
         if isinstance(pattern_settings.bitmap, np.ndarray):
             bitmap_pattern = BitmapPatternDefinition()
-            bitmap_pattern.points = pattern_settings.bitmap
+            if pattern_settings.bitmap.dtype == np.uint8:
+                points = ThermoMicroscope._bitmap_to_points(
+                    pattern_settings.bitmap
+                )
+            else:
+                # Assume bitmap is already a point array
+                points = pattern_settings.bitmap
+            bitmap_pattern.points = points
         else:
             bitmap_pattern = BitmapPatternDefinition.load(pattern_settings.bitmap)
 
