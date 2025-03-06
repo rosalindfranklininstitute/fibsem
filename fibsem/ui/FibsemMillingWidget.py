@@ -137,9 +137,8 @@ class FibsemMillingWidget(FibsemMillingWidgetUI.Ui_Form, QtWidgets.QWidget):
         self.milling_stages: List[FibsemMillingStage] = []
         self.milling_pattern_layers: List[Layer] = []
 
-        self.update_pattern_ui()
-
-        self.good_copy_pattern = None
+        self.pattern_attribute_widgets: Dict[str, Tuple[QtWidgets.QLabel, QtWidgets.QWidget]] = {}
+        self.strategy_config_widgets: Dict[str, QtWidgets.QWidget] = {}
 
         self.setup_connections()
         # TODO: migrate to MILLING_WORKFLOWS: Dict[str, List[FibsemMillingStage]]
@@ -776,9 +775,6 @@ class FibsemMillingWidget(FibsemMillingWidgetUI.Ui_Form, QtWidgets.QWidget):
 
     def _single_click(self, layer, event):
         """Callback for single click on image layer."""
-
-        # logging.info("_single_click")
-
         if event.button != 1 or 'Shift' not in event.modifiers or self.milling_stages == []:
             return
 

@@ -5508,20 +5508,6 @@ class DemoMicroscope(FibsemMicroscope):
             logging.info("Stopped thread image consumption")
 
     def autocontrast(self, beam_type: BeamType, reduced_area: FibsemRectangle = None) -> None:
-                if parent_ui is not None:
-                        parent_ui.live_imaging_signal.emit({"image": image})
-                time.sleep(sleep)
-        except KeyboardInterrupt:
-            self.stop_event
-            logging.info("Keyboard interrupt, stopping live imaging")
-        except Exception as e:
-            self.stop_event.set()
-            import traceback
-            logging.error(traceback.format_exc())
-        finally:
-            logging.info("Stopped thread image consumption")
-
-    def autocontrast(self, beam_type: BeamType) -> None:
         _check_beam(beam_type, self.system)
         if reduced_area is not None:
             self.set("reduced_area", reduced_area, beam_type=beam_type)
