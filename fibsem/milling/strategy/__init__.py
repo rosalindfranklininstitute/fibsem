@@ -2,11 +2,13 @@ from typing import Dict
 from fibsem.milling.base import MillingStrategy
 from fibsem.milling.strategy.standard import StandardMillingStrategy
 from fibsem.milling.strategy.overtilt import OvertiltTrenchMillingStrategy
+from fibsem.milling.strategy.adaptive_polish import AdaptivePolishMillingStrategy
 
 DEFAULT_STRATEGY = StandardMillingStrategy.name
 strategies: Dict[str, MillingStrategy] = {
     StandardMillingStrategy.name: StandardMillingStrategy,
     OvertiltTrenchMillingStrategy.name: OvertiltTrenchMillingStrategy,
+    AdaptivePolishMillingStrategy.name: AdaptivePolishMillingStrategy
 }
 MILLING_STRATEGY_NAMES = list(strategies.keys())
 
