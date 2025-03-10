@@ -51,9 +51,9 @@ def setup_milling(
     if milling_stage.alignment.enabled:
         from fibsem import alignment
         logging.info(f"FIB Aligning at Milling Current: {milling_stage.milling.milling_current:.2e}")
-        alignment.multi_step_alignment_v2(microscope=microscope, 
-                                        ref_image=ref_image, 
-                                        beam_type=milling_stage.milling.milling_channel, 
+        alignment.multi_step_alignment_v2(microscope=microscope,
+                                        ref_image=ref_image,
+                                        beam_type=milling_stage.milling.milling_channel,
                                         steps=1, use_autocontrast=True)  # high current -> damaging
 
 # TODO: migrate run milling to take milling_stage argument, rather than current, voltage
@@ -96,7 +96,7 @@ def draw_patterns(microscope: FibsemMicroscope, patterns: List[FibsemPatternSett
     for pattern in patterns:
         draw_pattern(microscope, pattern)
 
-        
+
 def draw_pattern(microscope: FibsemMicroscope, pattern: FibsemPatternSettings):
     """Draw a milling pattern from settings
 
@@ -114,7 +114,7 @@ def draw_pattern(microscope: FibsemMicroscope, pattern: FibsemPatternSettings):
         microscope.draw_circle(pattern)
 
     elif isinstance(pattern, FibsemBitmapSettings):
-        microscope.draw_bitmap_pattern(pattern, pattern.path)
+        microscope.draw_bitmap_pattern(pattern)
 
 def convert_to_bitmap_format(path):
     import os
@@ -136,9 +136,9 @@ def mill_stage(microscope: FibsemMicroscope, stage: FibsemMillingStage, asynch: 
     for pattern in stage.pattern.define():
         draw_pattern(microscope, pattern)
 
-    run_milling(microscope=microscope, 
-        milling_current=stage.milling.milling_current, 
-        milling_voltage=stage.milling.milling_voltage, 
+    run_milling(microscope=microscope,
+        milling_current=stage.milling.milling_current,
+        milling_voltage=stage.milling.milling_voltage,
         asynch=asynch)
 
 def mill_stages(
@@ -171,9 +171,9 @@ def mill_stages(
                     raise Exception("Milling stopped by user.")
 
                 msgd =  {"msg": f"Preparing: {stage.name}",
-                        "progress": {"state": "start", 
+                        "progress": {"state": "start",
                                     "start_time": start_time,
-                                    "current_stage": idx, 
+                                    "current_stage": idx,
                                     "total_stages": len(stages),
                                     }}
                 parent_ui.milling_progress_signal.emit(msgd)
@@ -192,8 +192,8 @@ def mill_stages(
 
                 # optionally acquire images after milling
                 if stage.milling.acquire_images:
-                    acquire_images_after_milling(microscope=microscope, milling_stage=stage, 
-                                                 start_time=start_time, 
+                    acquire_images_after_milling(microscope=microscope, milling_stage=stage,
+                                                 start_time=start_time,
                                                  path=imaging_path)
 
                 if parent_ui:
@@ -244,7 +244,7 @@ def acquire_images_after_milling(
     # set imaging parameters (filename, path, etc.)
     milling_stage.imaging.path = path
     milling_stage.imaging.filename = f"ref_milling_{milling_stage.name.replace(' ', '-')}_finished_{str(start_time).replace('.', '_')}"
-    
+
     # from pprint import pprint
     # pprint(milling_stage.imaging.to_dict())
 
@@ -258,5 +258,5 @@ def acquire_images_after_milling(
 
     return images
 
-# QUERY: should List[FibsemMillingStage] be a class? that has it's own settings? 
+# QUERY: should List[FibsemMillingStage] be a class? that has it's own settings?
 # E.G. should acquire images be set at that level, rather than at the stage level?

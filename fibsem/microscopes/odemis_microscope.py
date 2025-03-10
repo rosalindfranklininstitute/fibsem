@@ -192,7 +192,7 @@ def from_odemis_image(image: model.DataArray, path: str = None) -> FibsemImage:
 
     # get the data
     da = image.getData() if isinstance(image, model.DataArrayShadow) else image
-    
+
     return FibsemImage(data=da, metadata=image_md)
 
 def load_odemis_image(path: str) -> FibsemImage:
@@ -744,9 +744,9 @@ class OdemisMicroscope(FibsemMicroscope):
         beam_type: BeamType,
         base_position: FibsemStagePosition,
     ) -> FibsemStagePosition:
-        return ThermoMicroscope.project_stable_move(self, 
-                                                    dx=dx, dy=dy, 
-                                                    beam_type=beam_type, 
+        return ThermoMicroscope.project_stable_move(self,
+                                                    dx=dx, dy=dy,
+                                                    beam_type=beam_type,
                                                     base_position=base_position)
 
     def safe_absolute_stage_movement(self, position: FibsemStagePosition) -> None:
@@ -758,7 +758,7 @@ class OdemisMicroscope(FibsemMicroscope):
     def consume_image_queue(self):
         pass
 
-    def draw_bitmap_pattern(self, pattern_settings: FibsemBitmapSettings, path: str):
+    def draw_bitmap_pattern(self, pattern_settings: FibsemBitmapSettings):
         pass
 
     def draw_rectangle(self, pattern_settings: FibsemRectangleSettings):
@@ -890,7 +890,7 @@ class OdemisMicroscope(FibsemMicroscope):
         if self.get_milling_state() == MillingState.PAUSED:
             logging.info("Resuming milling...")
             self.connection.resume_milling()
-            logging.info("Milling resumed.")   
-    
+            logging.info("Milling resumed.")
+
     def estimate_milling_time(self) -> float:
         return self.connection.estimate_milling_time()

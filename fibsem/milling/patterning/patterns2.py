@@ -1,7 +1,8 @@
 from copy import deepcopy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Any
+from os import PathLike
 
 import numpy as np
 
@@ -62,29 +63,29 @@ class BasePattern(ABC):
         # calculate the total volume of the milling pattern (sum of all shapes)
         return sum([shape.volume for shape in self.define()])
 
+
 @dataclass
 class BitmapPattern(BasePattern):
     width: float
     height: float
     depth: float
+    bitmap: Union[str, PathLike[str], np.typing.NDArray[Any]]
     rotation: float = 0
-    path: str = ""
     shapes: List[FibsemPatternSettings] = None
     point: Point = Point()
     name: str = "Bitmap"
 
-    def define(self) -> List[FibsemPatternSettings]:
 
+    def define(self) -> List[FibsemBitmapSettings]:
         shape = FibsemBitmapSettings(
             width=self.width,
             height=self.height,
             depth=self.depth,
-            rotation=self.rotation,
-            path=self.path,
+            rotation=self.rotation * constants.DEGREES_TO_RADIANS,
             centre_x=self.point.x,
             centre_y=self.point.y,
-        )
-
+            bitmap=self.bitmap
+            )
         self.shapes = [shape]
         return self.shapes
 
@@ -96,7 +97,7 @@ class BitmapPattern(BasePattern):
             "height": self.height,
             "depth": self.depth,
             "rotation": self.rotation,
-            "path": self.path
+            "bitmap": self.bitmap
         }
 
     @classmethod
@@ -106,9 +107,10 @@ class BitmapPattern(BasePattern):
             height=ddict["height"],
             depth=ddict["depth"],
             rotation=ddict.get("rotation", 0),
-            path=ddict.get("path", ""),
+            bitmap=ddict["bitmap"],
             point=Point.from_dict(ddict.get("point", DEFAULT_POINT_DDICT))
         )
+
 
 
 @dataclass
@@ -1281,8 +1283,91 @@ class TrapezoidPattern(BasePattern):
 
 @dataclass
 class TrenchBitmapPattern(BasePattern):
-    pass
-    #TODO Tom
+    width: float
+    depth: float
+    spacing: float
+    upper_trench_height: float
+    lower_trench_height: float
+    bitmap: Union[str, PathLike[str], np.typing.NDArray[Any]]
+    cross_section: CrossSectionPattern = CrossSectionPattern.Rectangle
+    point: Point = Point()
+    name: str = "TrenchBitmap"
+
+    shapes: List[FibsemBitmapSettings] = None
+
+
+    def define(self) -> list[FibsemRectangleSettings]:
+
+        point = self.point
+        width = self.width
+        spacing = self.spacing
+        upper_trench_height = self.upper_trench_height
+        lower_trench_height = self.lower_trench_height
+        bitmap = self.bitmap
+        depth = self.depth
+        cross_section = self.cross_section
+        time = self.time
+
+        # calculate the centre of the upper and lower trench
+        centre_lower_y = point.y - (spacing / 2 + lower_trench_height / 2)
+        centre_upper_y = point.y + (spacing / 2 + upper_trench_height / 2)
+
+        # mill settings
+        lower_pattern_settings = FibsemBitmapSettings(
+            width=width,
+            height=lower_trench_height,
+            depth=depth,
+            centre_x=point.x,
+            centre_y=centre_lower_y,
+            scan_direction="BottomToTop",
+            bitmap=bitmap,
+            cross_section=cross_section,
+            time=time
+        )
+
+        upper_pattern_settings = FibsemBitmapSettings(
+            width=width,
+            height=upper_trench_height,
+            depth=depth,
+            centre_x=point.x,
+            centre_y=centre_upper_y,
+            scan_direction="TopToBottom",
+            bitmap=bitmap,
+            cross_section=cross_section,
+            time=time
+        )
+
+        self.shapes = [lower_pattern_settings, upper_pattern_settings]
+        return self.shapes
+
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "point": self.point.to_dict(),
+            "width": self.width,
+            "depth": self.depth,
+            "spacing": self.spacing,
+            "upper_trench_height": self.upper_trench_height,
+            "lower_trench_height": self.lower_trench_height,
+            "cross_section": self.cross_section.name,
+            "time": self.time
+        }
+
+    @classmethod
+    def from_dict(cls, ddict: dict) -> "TrenchPattern":
+        return cls(
+            width=ddict["width"],
+            depth=ddict["depth"],
+            spacing=ddict["spacing"],
+            upper_trench_height=ddict["upper_trench_height"],
+            lower_trench_height=ddict["lower_trench_height"],
+            cross_section=CrossSectionPattern[ddict.get("cross_section", "Rectangle")],
+            time=ddict.get("time", 0),
+            point=Point.from_dict(ddict.get("point", DEFAULT_POINT_DDICT))
+        )
+
+
 
 def create_triangle_patterns(
     width: float, height: float, depth: float, angle: float = 30, point: Point = Point()
@@ -1338,7 +1423,7 @@ MILLING_PATTERNS: Dict[str, BasePattern] = {
     CloverPattern.name.lower(): CloverPattern,
     TriForcePattern.name.lower(): TriForcePattern,
     # TrapezoidPattern.name.lower(): TrapezoidPattern,
-    # BitmapPattern.name.lower(): BitmapPattern,
+    BitmapPattern.name.lower(): BitmapPattern,
     TrenchBitmapPattern.name.lower(): TrenchBitmapPattern,
 }
 MILLING_PATTERN_NAMES = [p.name for p in MILLING_PATTERNS.values()]

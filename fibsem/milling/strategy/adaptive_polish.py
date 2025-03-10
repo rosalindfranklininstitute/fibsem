@@ -113,7 +113,7 @@ class AdaptivePolishMillingStrategy(MillingStrategy):
         logging.info(f"Running {self.fullname} for {stage.name}")
 
         # setup milling
-        ap = AdaptivePolish(self.config.to_dict())
+        ap = AdaptivePolish(self.config.to_dict(), microscope)
         setup_milling()
 
         # run adaptive polishing

@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Any
+from collections.abc import Generator
 
 import numpy as np
 import tifffile as tff
@@ -1059,7 +1060,7 @@ class FibsemBitmapSettings(FibsemPatternSettings):
     rotation: float
     centre_x: float
     centre_y: float
-    path: str = None
+    bitmap: Union[str, os.PathLike[str], np.typing.NDArray[Any]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -1069,7 +1070,7 @@ class FibsemBitmapSettings(FibsemPatternSettings):
             "rotation": self.rotation,
             "centre_x": self.centre_x,
             "centre_y": self.centre_y,
-            "path": self.path,
+            "bitmap": self.bitmap,
         }
 
     @staticmethod
@@ -1081,7 +1082,7 @@ class FibsemBitmapSettings(FibsemPatternSettings):
             rotation=data["rotation"],
             centre_x=data["centre_x"],
             centre_y=data["centre_y"],
-            path=data["path"],
+            bitmap=data["bitmap"],
         )
 
     @property
@@ -2117,7 +2118,7 @@ class ReferenceImages:
     low_res_ib: FibsemImage
     high_res_ib: FibsemImage
 
-    def __iter__(self) -> List[FibsemImage]:
+    def __iter__(self) -> Generator[Tuple[FibsemImage, FibsemImage, FibsemImage, FibsemImage], None, None]:
         yield self.low_res_eb, self.high_res_eb, self.low_res_ib, self.high_res_ib
 
 
