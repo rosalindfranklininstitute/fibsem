@@ -462,17 +462,17 @@ class FibsemMillingWidget(FibsemMillingWidgetUI.Ui_Form, QtWidgets.QWidget):
                 control_widget.setValue(0)
                 control_widget.setKeyboardTracking(False)
 
-                val = scale_value_for_display(key, val, constants.SI_TO_MICRO) # TODO: confirm
+                # val = scale_value_for_display(key, val, constants.SI_TO_MICRO) # TODO: confirm
                 if key in ["overtilt"]:
                     control_widget.setSuffix(" °")
                 control_widget.setValue(val)
-            if isinstance(val, str):
+            elif isinstance(val, str):
                 control_widget = QtWidgets.QLineEdit()
                 control_widget.setText(val)
-            if isinstance(val, bool):
+            elif isinstance(val, bool):
                 control_widget = QtWidgets.QCheckBox()
                 control_widget.setChecked(bool(val))
-            if isinstance(val, (tuple, list)):
+            elif isinstance(val, (tuple, list)):
                 # dont handle for now
                 if "resolution" in key:
                     control_widget = QtWidgets.QComboBox()

@@ -21,33 +21,15 @@ from adaptive_polish.main import AdaptivePolish
 
 @dataclass
 class AdaptivePolishMillingConfig(MillingStrategyConfig):
-    # Adaptive polish settings
+    align_sem: bool = True
     milling_interval_s: int = 10
     gis_stop_um: float = 0.2
     max_crack_area_um2: float = 2
     max_milling_cycles: int = 30
-    align_sem: bool = True
-    plots: bool = True
-
-    # GIS measurement settings
     window_size_px: int = 10
-    model_path: Path = None
+    model_path: str = "abc"  #TODO add support in FibsemMillingWidget.set_milling_strategy_ui for path inputs
 
-    # Imaging settings
-    sem_resolution: Tuple[int, int] = (3072, 2048)
-    sem_hfw_um: float = 40
-    sem_dwell_time_ns: float = 200
-    sem_frame_integration: int = 8
-    fib_resolution: Tuple[int, int] = (3072, 2048)
-    fib_hfw_um: float = 40
-    fib_dwell_time_ns: float = 200
-    fib_frame_integration: int = 8
-
-    _advanced_attributes = [
-        "plots", "window_size_px", "model_path", "sem_resolution", "sem_hfw_um",
-        "sem_dwell_time_ns", "sem_frame_integration", "fib_resolution", "fib_hfw_um",
-        "fib_dwell_time_ns", "fib_frame_integration",
-    ]
+    _advanced_attributes = []
 
     @staticmethod
     def from_dict(d: dict) -> "AdaptivePolishMillingConfig":
@@ -56,25 +38,12 @@ class AdaptivePolishMillingConfig(MillingStrategyConfig):
     def to_dict(self):
         return {
             "milling_interval_s": self.milling_interval_s,
-            "gis_stop_um": self.gis_stop_um,
-            "max_crack_area_um2": self.max_crack_area_um2,
+            "gis_stop_m": self.gis_stop_um,
+            "max_crack_area_m2": self.max_crack_area_um2,
+            "max_milling_cycles": self.max_milling_cycles,
             "use_sem_beam_shift_alignment": self.align_sem,
             "window_size_px": self.window_size_px,
             "model_path": self.model_path,
-            "imaging_settings": {
-                "electron": {
-                    "resolution": self.sem_resolution,
-                    "hfw_um": self.sem_hfw_um,
-                    "dwell_time_ns": self.sem_dwell_time_ns,
-                    "frame_integration": self.sem_frame_integration,
-                },
-                "ion": {
-                    "resolution": self.fib_resolution,
-                    "hfw_um": self.fib_hfw_um,
-                    "dwell_time_ns": self.fib_dwell_time_ns,
-                    "frame_integration": self.fib_frame_integration,
-                },
-            },
         }
 
 
