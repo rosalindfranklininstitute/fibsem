@@ -41,13 +41,13 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
     @staticmethod
     def from_dict(d: dict) -> "OvertiltTrenchMillingStrategy":
         config = OvertiltTrenchMillingConfig.from_dict(d["config"])
-        
+
         return OvertiltTrenchMillingStrategy(config=config)
 
     def run(self, microscope: FibsemMicroscope, stage: "FibsemMillingStage", asynch: bool = False,
         parent_ui = None) -> None:
 
-        """Mill a trench pattern with overtilt, 
+        """Mill a trench pattern with overtilt,
         based on https://www.sciencedirect.com/science/article/abs/pii/S1047847716301514 and autolamella v1"""
         logging.info(f"Running {self.fullname} for {stage.name}")
 
@@ -63,8 +63,8 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
         # TODO: attach image_settings to microscope? or get current settings?
         # TODO: use drift correction structure to re-align? once added to milling stage
         image_settings = ImageSettings(hfw=stage.milling.hfw,
-                                       dwell_time=1e-6, 
-                                       resolution=[1536, 1024], 
+                                       dwell_time=1e-6,
+                                       resolution=[1536, 1024],
                                        beam_type=stage.milling.milling_channel)
         image_settings.reduced_area = stage.alignment.rect
         image_settings.path = os.getcwd()
@@ -73,7 +73,7 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
 
         # TODO: support rr
         for i, pattern in enumerate(stage.pattern.define()):
-            
+
             # TODO: validate which direction to tilt, including when combined with scan rotation
             scan_rotation = microscope.get("scan_rotation", stage.milling.milling_channel)
             # overtilt
@@ -86,10 +86,10 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
             # beam alignment
             image_settings = ImageSettings.fromFibsemImage(ref_image)
             image_settings.filename = f"{stage.name}_overtilt_alignment_target_{i}"
-            
-            alignment.multi_step_alignment_v2(microscope=microscope, 
-                                            ref_image=ref_image, 
-                                            beam_type=stage.milling.milling_channel, 
+
+            alignment.multi_step_alignment_v2(microscope=microscope,
+                                            ref_image=ref_image,
+                                            beam_type=stage.milling.milling_channel,
                                             alignment_current=None,
                                             steps=3)
 
@@ -100,11 +100,11 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
             draw_pattern(microscope=microscope, pattern=pattern)
 
             # run milling
-            run_milling(microscope=microscope, 
-                        milling_current=stage.milling.milling_current, 
-                        milling_voltage=stage.milling.milling_voltage, 
+            run_milling(microscope=microscope,
+                        milling_current=stage.milling.milling_current,
+                        milling_voltage=stage.milling.milling_voltage,
                         asynch=False)
-            
+
             # finish milling (clear patterns, restore imaging current)
             finish_milling(
                 microscope=microscope,
