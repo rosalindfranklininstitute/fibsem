@@ -1,7 +1,6 @@
 import logging
 import time
-import os
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from fibsem import config as fcfg
 from fibsem.microscope import FibsemMicroscope
@@ -32,46 +31,32 @@ def setup_milling(
         milling_stage (FibsemMillingStage): Milling Stage
     """
 
+    ref_image = getattr(milling_stage, "ref_image", None)
+
     # acquire reference image for drift correction
-    if milling_stage.alignment.enabled:
-        from fibsem import alignment
-
-        try:
-            if milling_stage.imaging.path is None:
-                raise ValueError(f"No path set for milling stage {milling_stage.name}")
-            possible_ref_image_path = os.path.join(
-                milling_stage.imaging.path, "ref_alignment_ib.tif"
-            )
-            ref_image = FibsemImage.load(possible_ref_image_path)
-        except Exception as e:
-            logging.warning(
-                f"Failed to load existing reference image, a new one will be taken: {e}"
-            )
-            image_settings = ImageSettings(
-                hfw=milling_stage.milling.hfw,
-                dwell_time=1e-6,
-                resolution=[1536, 1024],
-                beam_type=milling_stage.milling.milling_channel,
-                reduced_area=milling_stage.alignment.rect,
-                path=fcfg.DATA_CC_PATH,  # TODO: set this to the last-path?
-                filename=f"ref_{milling_stage.name}_initial_alignment_{current_timestamp_v2()}",
-            )
-            ref_image = microscope.acquire_image(image_settings)
-
-        logging.info(
-            f"FIB Aligning at Milling Current: {milling_stage.milling.milling_current:.2e}"
-        )
-        alignment.multi_step_alignment_v2(
-            microscope=microscope,
-            ref_image=ref_image,
+    if milling_stage.alignment.enabled and ref_image is None:
+        image_settings = ImageSettings(
+            hfw=milling_stage.milling.hfw,
+            dwell_time=1e-6,
+            resolution=[1536, 1024],
             beam_type=milling_stage.milling.milling_channel,
-            alignment_current=milling_stage.milling.milling_current,
-            steps=3,
-            use_autocontrast=True,
-        )  # high current -> damaging
+            reduced_area=milling_stage.alignment.rect,
+            path=fcfg.DATA_CC_PATH, # TODO: set this to the last-path?
+            filename=f"ref_{milling_stage.name}_initial_alignment_{current_timestamp_v2()}"
+        )
+        ref_image = microscope.acquire_image(image_settings)
 
     # set up milling settings
     microscope.setup_milling(mill_settings=milling_stage.milling)
+
+    # align at the milling current to correct for shift
+    if milling_stage.alignment.enabled:
+        from fibsem import alignment
+        logging.info(f"FIB Aligning at Milling Current: {milling_stage.milling.milling_current:.2e}")
+        alignment.multi_step_alignment_v2(microscope=microscope, 
+                                        ref_image=ref_image, 
+                                        beam_type=milling_stage.milling.milling_channel, 
+                                        steps=3, use_autocontrast=True)  # high current -> damaging
 
 # TODO: migrate run milling to take milling_stage argument, rather than current, voltage
 def run_milling(
@@ -170,6 +155,7 @@ def mill_stages(
 
     # TMP: store initial imaging path
     imaging_path = microscope.get_imaging_settings(beam_type=BeamType.ION).path
+    initial_beam_shift = None
 
     try:
         if hasattr(microscope, "milling_progress_signal"):
@@ -180,6 +166,23 @@ def mill_stages(
                 def _handle_progress(ddict: dict) -> None:
                     logging.info(ddict)
             microscope.milling_progress_signal.connect(_handle_progress)
+
+
+        # TODO: move into try, only do for stage ===0
+        image_settings = ImageSettings(
+            hfw=stages[0].milling.hfw,
+            dwell_time=1e-6,
+            resolution=[1536, 1024],
+            beam_type=stages[0].milling.milling_channel,
+            reduced_area=stages[0].alignment.rect,
+            path=fcfg.DATA_CC_PATH, # TODO: set this to the last-path?
+            filename=f"ref_{stages[0].name}_initial_alignment_{current_timestamp_v2()}"
+        )
+        ref_image = microscope.acquire_image(image_settings)
+        
+        initial_beam_shift = microscope.get("shift", beam_type=stages[0].milling.milling_channel)
+
+        # TODO: reset beam shift after aligning at milling current
 
         for idx, stage in enumerate(stages):
             start_time = time.time()
@@ -196,6 +199,7 @@ def mill_stages(
                 parent_ui.milling_progress_signal.emit(msgd)
 
             try:
+                stage.ref_image = ref_image
                 stage.strategy.run(
                     microscope=microscope,
                     stage=stage,
@@ -232,6 +236,9 @@ def mill_stages(
             imaging_current=microscope.system.ion.beam.beam_current,
             imaging_voltage=microscope.system.ion.beam.voltage,
         )
+        # restore initial beam shift
+        if initial_beam_shift is not None:
+            microscope.set(key="shift", value=initial_beam_shift, beam_type=BeamType.ION)
         if hasattr(microscope, "milling_progress_signal"):
             microscope.milling_progress_signal.disconnect(_handle_progress)
 

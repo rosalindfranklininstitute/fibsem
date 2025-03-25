@@ -150,7 +150,7 @@ def beam_shift_alignment_v2(
     # reset beam current
     if alignment_current is not None:
         microscope.set("current", initial_current, image_settings.beam_type)
-    
+    logging.info(f"Beam Shift Alignment: dx: {dx}, dy: {dy}")
     msgd = {"msg": "beam_shift_alignment", "dx": dx, "dy": dy, "image_settings": image_settings.to_dict()}
     logging.debug(msgd)
 
