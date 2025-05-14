@@ -1,6 +1,7 @@
 import logging
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Union
+from os import PathLike
 
 from fibsem import config as fcfg
 from fibsem.microscope import FibsemMicroscope
@@ -144,6 +145,7 @@ def mill_stage(microscope: FibsemMicroscope, stage: FibsemMillingStage, asynch: 
 def mill_stages(
     microscope: FibsemMicroscope,
     stages: List[FibsemMillingStage],
+    directory: Optional[Union[str, PathLike]] = None,
     parent_ui=None,
 ):
     """Run a list of milling stages, with a progress bar and notifications."""
@@ -182,6 +184,7 @@ def mill_stages(
                 stage.strategy.run(
                     microscope=microscope,
                     stage=stage,
+                    directory=directory,
                     asynch=False,
                     parent_ui=parent_ui,
                 )

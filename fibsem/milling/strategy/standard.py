@@ -31,7 +31,7 @@ class StandardMillingStrategy(MillingStrategy):
 
     @staticmethod
     def from_dict(d: dict) -> "StandardMillingStrategy":
-        config=StandardMillingConfig.from_dict(d.get("config", {}))   
+        config=StandardMillingConfig.from_dict(d.get("config", {}))
         return StandardMillingStrategy(config=config)
 
     def run(
@@ -50,7 +50,7 @@ class StandardMillingStrategy(MillingStrategy):
         estimated_time = microscope.estimate_milling_time()
         logging.info(f"Estimated time for {stage.name}: {estimated_time:.2f} seconds")
 
-        if parent_ui:
+        if parent_ui is not None and hasattr(parent_ui, "milling_progress_signal"):
             parent_ui.milling_progress_signal.emit({"msg": f"Running {stage.name}...", 
                                                     "progress": 
                                                         {"started": True,

@@ -977,11 +977,16 @@ class FibsemMillingWidget(FibsemMillingWidgetUI.Ui_Form, QtWidgets.QWidget):
         worker.start()
 
     @thread_worker
-    def run_milling_step(self, milling_stages: List[FibsemMillingStage]) -> None:
+    def run_milling_step(
+        self,
+        milling_stages: List[FibsemMillingStage],
+        directory: Optional[Union[str, os.PathLike]] = None,
+    ) -> None:
         """Threaded worker to run the milling stages."""
         # new milling interface
         mill_stages(microscope=self.microscope,
                             stages=milling_stages,
+                            directory=directory,
                             parent_ui=self)
         return
 
