@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, fields
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Union
+from os import PathLike
 
 from fibsem.microscope import FibsemMicroscope
 from fibsem.milling.config import MILLING_SPUTTER_RATE
@@ -45,7 +46,14 @@ class MillingStrategy(ABC):
         return cls(**d)
 
     @abstractmethod
-    def run(self, microscope: FibsemMicroscope, stage: "FibsemMillingStage", asynch: bool = False, parent_ui = None) -> None:
+    def run(
+        self,
+        microscope: FibsemMicroscope,
+        stage: "FibsemMillingStage",
+        directory: Optional[Union[str, PathLike]] = None,
+        asynch: bool = False,
+        parent_ui=None,
+    ) -> None:
         pass
 
 def get_strategy(name: str = "Standard", config: Dict[str, Any] = {}) -> MillingStrategy:

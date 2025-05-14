@@ -1,5 +1,7 @@
 import logging
 from dataclasses import dataclass
+from os import PathLike
+from typing import Optional, Union
 
 from fibsem.microscope import FibsemMicroscope
 from fibsem.milling import (draw_patterns, run_milling,
@@ -36,6 +38,7 @@ class StandardMillingStrategy(MillingStrategy):
         self,
         microscope: FibsemMicroscope,
         stage: FibsemMillingStage,
+        directory: Optional[Union[str, PathLike]] = None,
         asynch: bool = False,
         parent_ui = None,
     ) -> None:

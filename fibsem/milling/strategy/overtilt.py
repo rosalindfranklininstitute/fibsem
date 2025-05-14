@@ -2,6 +2,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from typing import Optional, Union
 
 import numpy as np
 
@@ -44,8 +45,14 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
 
         return OvertiltTrenchMillingStrategy(config=config)
 
-    def run(self, microscope: FibsemMicroscope, stage: "FibsemMillingStage", asynch: bool = False,
-        parent_ui = None) -> None:
+    def run(
+        self,
+        microscope: FibsemMicroscope,
+        stage: "FibsemMillingStage",
+        directory: Optional[Union[str, os.PathLike]] = None,
+        asynch: bool = False,
+        parent_ui=None,
+    ) -> None:
 
         """Mill a trench pattern with overtilt,
         based on https://www.sciencedirect.com/science/article/abs/pii/S1047847716301514 and autolamella v1"""
@@ -67,7 +74,7 @@ class OvertiltTrenchMillingStrategy(MillingStrategy):
                                        resolution=[1536, 1024],
                                        beam_type=stage.milling.milling_channel)
         image_settings.reduced_area = stage.alignment.rect
-        image_settings.path = os.getcwd()
+        image_settings.path = os.getcwd() if directory is None else str(directory)
         image_settings.filename = f"ref_{stage.name}_overtilt_alignment"
         ref_image = acquire.acquire_image(microscope, image_settings)
 
