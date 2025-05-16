@@ -1730,7 +1730,7 @@ class ThermoMicroscope(FibsemMicroscope):
          
         if name not in ["PARK", "EUCENTRIC"]:
             raise ValueError(f"insert position {name} not supported.")
-        if VERSION < 4.7:
+        if VERSION < parse("4.7"):
             raise NotImplementedError("Manipulator saved positions not supported in this version. Please upgrade to 4.7 or higher")
         
         # get the saved position name
@@ -1753,7 +1753,7 @@ class ThermoMicroscope(FibsemMicroscope):
     def retract_manipulator(self):
         """Retract the manipulator"""        
 
-        if VERSION < 4.7:
+        if VERSION < parse("4.7"):
             raise NotImplementedError("Manipulator saved positions not supported in this version. Please upgrade to 4.7 or higher")
 
         if not self.is_available("manipulator"):
@@ -1913,7 +1913,7 @@ class ThermoMicroscope(FibsemMicroscope):
         
         if name not in ["PARK", "EUCENTRIC"]:
             raise ValueError(f"saved position {name} not supported.")
-        if VERSION < 4.7:
+        if VERSION < parse("4.7"):
             raise NotImplementedError("Manipulator saved positions not supported in this version. Please upgrade to 4.7 or higher")
         
         named_position = ManipulatorSavedPosition.PARK if name == "PARK" else ManipulatorSavedPosition.EUCENTRIC
