@@ -1,3 +1,4 @@
+from __future__ import annotations
 import datetime
 import glob
 
@@ -6,19 +7,21 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 
 import yaml
 from PIL import Image
 
 from fibsem import config as cfg
-from fibsem.microscope import FibsemMicroscope
 from fibsem.structures import (
     BeamType,
     FibsemImage,
     MicroscopeSettings,
 )
+
+if TYPE_CHECKING:
+    from fibsem.microscope import FibsemMicroscope
 
 
 def current_timestamp():

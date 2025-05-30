@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Set, Any, Dict
+from typing import List, Optional, Tuple, Union, Set, Any, Dict, Generator
 
 import numpy as np
 import tifffile as tff
@@ -1939,7 +1939,7 @@ class ReferenceImages:
     low_res_ib: FibsemImage
     high_res_ib: FibsemImage
 
-    def __iter__(self) -> List[FibsemImage]:
+    def __iter__(self) -> Generator[Tuple[FibsemImage, FibsemImage, FibsemImage, FibsemImage], None, None]:
         yield self.low_res_eb, self.high_res_eb, self.low_res_ib, self.high_res_ib
 
 
