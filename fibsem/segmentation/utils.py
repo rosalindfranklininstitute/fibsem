@@ -299,9 +299,9 @@ def list_available_checkpoints():
     api = HfApi()
     files = api.list_repo_files(cfg.HUGGINFACE_REPO)
     checkpoints = []
-    for file in files:
-        if file.endswith(".pt") and "archive" not in file:
-            checkpoints.append(file)
+    for f in files:
+        if f.endswith(".pt") and "archive" not in f:
+            checkpoints.append(f)
 
     return checkpoints
 
@@ -319,7 +319,7 @@ def list_available_checkpoints_v2():
     try:
         api = HfApi()
         files = api.list_repo_files(cfg.HUGGINFACE_REPO)
-        checkpoints = [file for file in files if file.endswith(".pt") and "archive" not in file]
+        checkpoints = [f for f in files if f.endswith(".pt") and "archive" not in f]
         return checkpoints
     except Exception as e:
         # if api fails, fall back to local cache
