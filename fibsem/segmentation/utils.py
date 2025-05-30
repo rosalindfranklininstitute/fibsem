@@ -140,7 +140,7 @@ def validate_config(config:dict):
         raise ValueError("wandb is missing. Used to enable/disable wandb logging in training loop. Should be a boolean value.")
     else:
         val = config["wandb"]
-        if type(val) != bool:
+        if type(val) is not bool:
             raise TypeError(f"{val} is not a boolean (True/False). (wandb)")
     if "checkpoint" not in config:
         raise ValueError("checkpoint is missing. Either a path leading to the desired saved model, or None value.")
@@ -152,7 +152,7 @@ def validate_config(config:dict):
         raise ValueError("encoder is missing. Used to specify which model architecture to use. Default is resnet18.")
     else:
         val = config["encoder"]
-        if type(val) != str:
+        if type(val) is not str:
             raise TypeError(f"{val} must be a string. (encoder)")
         elif val not in unet_encoders:
             raise ValueError(f"{val} not a valid encoder. Check readme for full list. (encoder)")
@@ -160,25 +160,25 @@ def validate_config(config:dict):
         raise ValueError("epochs is missing. Integer value used to determine number of epochs model trains for.")
     else:
         val = config["epochs"]
-        if type(val) != int or val <= 0:
+        if type(val) is not int or val <= 0:
             raise TypeError(f"{val} is not a positive integer. (epochs)")  
     if "batch_size" not in config:
         raise ValueError("batch_size is missing. Integer value used to determine batch size of dataset.")
     else:
         val = config["batch_size"]
-        if type(val) != int or val <= 0:
+        if type(val) is not int or val <= 0:
             raise TypeError(f"{val} is not a positive integer. (batch_size)")    
     if "num_classes" not in config:
         raise ValueError("num_classes is missing. Integer value used to determine number of classes model classifies.")
     else:
         val = config["num_classes"]
-        if type(val) != int or val <= 0:
+        if type(val) is not int or val <= 0:
             raise TypeError(f"{val} is not a positive integer. (num_classes)")  
     if "lr" not in config:
         raise ValueError("lr is missing. Float value indicating the learning rate of the model.")
     else:
         val = config["lr"]
-        if type(val) == float:
+        if type(val) is float:
             if val <= 0:
                 raise ValueError(f"{val} must be a positive float value (lr).")
         else:
@@ -187,13 +187,13 @@ def validate_config(config:dict):
         raise ValueError("wandb_project is missing. String indicating the wandb project title for login.")
     else:
         val = config["wandb_project"]
-        if type(val) != str:
+        if type(val) is not str:
             raise TypeError(f"{val} is not a string. (wandb_project)")
     if "wandb_entity" not in config:
         raise ValueError("wandb_entity is missing. String indicating the wandb login credentials.")
     else:
         val = config["wandb_entity"]
-        if type(val) != str:
+        if type(val) is not str:
             raise TypeError(f"{val} is not a string. (wandb_project)")
     return
     
